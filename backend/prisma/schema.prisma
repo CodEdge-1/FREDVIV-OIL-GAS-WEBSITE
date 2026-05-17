@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  ACCOUNTANT
+  AUDITOR
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SalesReportStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum BalanceRequestStatus {
+  PENDING
+  APPROVED
+  EXPIRED
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  pinHash      String?
+  role         Role
+  status       UserStatus @default(ACTIVE)
+  branchId     String?
+  branch       Branch?    @relation(fields: [branchId], references: [id])
+
+  salesReports     SalesReport[]
+  expenses         Expense[]
+  approvedExpenses Expense[]        @relation("ExpenseApprover")
+  balanceRequests  BalanceRequest[]
+  approvedRequests BalanceRequest[] @relation("BalanceApprover")
+  fuelPrices       FuelPrice[]
+  sentMessages     ChatMessage[]    @relation("Sender")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Branch {
+  id       String @id @default(cuid())
+  name     String
+  location String
+
+  users        User[]
+  salesReports SalesReport[]
+  expenses     Expense[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SalesReport {
+  id        String @id @default(cuid())
+  branchId  String
+  branch    Branch @relation(fields: [branchId], references: [id])
+  managerId String
+  manager   User   @relation(fields: [managerId], references: [id])
+
+  date         DateTime @db.Date
+  openingPMS   Float
+  openingAGO   Float
+  soldPMS      Float
+  soldAGO      Float
+  remainingPMS Float
+  remainingAGO Float
+  overage      Float    @default(0)
+
+  pmsPrice   Float
+  agoPrice   Float
+  totalSales Float
+
+  cardPayments  Float
+  bankTransfers Float
+  cashPayments  Float
+
+  status      SalesReportStatus @default(DRAFT)
+  submittedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([branchId, date])
+}
+
+model Expense {
+  id            String @id @default(cuid())
+  branchId      String
+  branch        Branch @relation(fields: [branchId], references: [id])
+  submittedById String
+  submittedBy   User   @relation(fields: [submittedById], references: [id])
+
+  type        String
+  description String
+  amount      Float
+  date        DateTime @db.Date
+
+  status       ExpenseStatus @default(PENDING)
+  approvedById String?
+  approvedBy   User?         @relation("ExpenseApprover", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+  rejectReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FuelPrice {
+  id      String @id @default(cuid())
+  setById String
+  setBy   User   @relation(fields: [setById], references: [id])
+
+  pmsPrice      Float
+  agoPrice      Float
+  effectiveFrom DateTime @default(now())
+
+  createdAt DateTime @default(now())
+}
+
+model BalanceRequest {
+  id            String @id @default(cuid())
+  requestedById String
+  requestedBy   User   @relation(fields: [requestedById], references: [id])
+
+  status       BalanceRequestStatus @default(PENDING)
+  approvedById String?
+  approvedBy   User?                @relation("BalanceApprover", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+  expiresAt    DateTime?
+
+  createdAt DateTime @default(now())
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  reference   String          @unique
+  description String
+  amount      Float
+  type        TransactionType
+  date        DateTime        @db.Date
+
+  createdAt DateTime @default(now())
+}
+
+model ChatMessage {
+  id       String @id @default(cuid())
+  senderId String
+  sender   User   @relation("Sender", fields: [senderId], references: [id])
+  roomId   String
+  content  String
+
+  createdAt DateTime @default(now())
+}
