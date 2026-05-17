@@ -1,7 +1,7 @@
 
-  # Enterprise Website UI Design
+  # FREDVIV Oil & Gas Website
 
-  This is a code bundle for Enterprise Website UI Design. The original project is available at https://www.figma.com/design/W5vX9B43UV60qxEHWy9Ru7/Enterprise-Website-UI-Design.
+  This is the implementation of FREDVIV Oil & Gas website. The UI design is available at https://www.figma.com/design/W5vX9B43UV60qxEHWy9Ru7/Enterprise-Website-UI-Design.
 
   ## Running the code
 
