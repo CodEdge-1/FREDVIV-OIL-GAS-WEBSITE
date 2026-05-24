@@ -1,35 +1,66 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
-const prisma = new PrismaClient({
-  datasources: {
-    db: {
-      url: process.env.DIRECT_URL,
-    },
-  },
-});
+const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await bcrypt.hash('FredAdmin1234$', 10);
+  console.log('Starting database seeding...');
 
-  const admin = await prisma.user.upsert({
-    where: { email: 'agindotanfamily@gmail.com' },
+  // 1. Clean existing data (optional, use with caution)
+  // await prisma.user.deleteMany();
+
+  // 0. Create a Branch first (User needs a branchId, not a string)
+  const branch = await prisma.branch.upsert({
+    where: { id: 'vi-branch-001' },
     update: {},
     create: {
-      name: 'Fredviv Admin',
-      email: 'agindotanfamily@gmail.com',
-      passwordHash,
-      role: 'ADMIN',
-      status: 'ACTIVE',
+      id: 'vi-branch-001',
+      name: 'Victoria Island',
+      location: 'Lagos',
+    },
+  });
+  console.log('Branch created');
+
+  // 2. Create Admin User
+  const adminEmail = 'agindotanfamily@gmail.com';
+  const hashedPassword = await bcrypt.hash('Admin@2024', 10);
+
+  const admin = await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {},
+    create: {
+      email: adminEmail,
+      passwordHash: hashedPassword,
+      name: 'Agindotan Emmanuel',
+      role: Role.ADMIN,
+      status: UserStatus.ACTIVE,
     },
   });
 
-  console.log('Admin user created:', admin.email);
+  console.log(` Admin user created/verified: ${admin.email}`);
+
+  // 3. Create a sample Branch Manager
+  const managerEmail = 'manager@fredvivoil.com';
+  await prisma.user.upsert({
+    where: { email: managerEmail },
+    update: {},
+    create: {
+      email: managerEmail,
+      passwordHash: hashedPassword,
+      name: 'John Branch',
+      role: Role.MANAGER,
+      status: UserStatus.ACTIVE,
+      branchId: branch.id,
+    },
+  });
+
+  console.log('Sample manager created');
+  console.log('Seeding completed successfully.');
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error('Seeding error:', e);
     process.exit(1);
   })
   .finally(async () => {

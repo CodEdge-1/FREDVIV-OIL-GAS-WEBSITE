@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
-import { logout, getAccounts } from '../../lib/auth';
+import { logout, StaffAccount } from '../../lib/auth'; // Keep StaffAccount type for now
 import { ChatPanel } from '../../components/dashboard/ChatPanel';
 import {
-  getTodayRevenue, getPendingExpenseCount, getSalesReports, getExpenses,
-  AVAILABLE_BANKS,
-} from '../../lib/store';
+  type SalesReport, // Keep type for now
+  type Expense, // Keep type for now
+  AVAILABLE_BANKS, // Keep for now, will be fetched from backend
+} from '../../lib/store'; // Remove local storage functions
+import { api } from '../../lib/api';
+import { StatCard } from '../../components/dashboard/StatCard';
+import { toast } from 'sonner';
 import { Users, DollarSign, FileText, TrendingUp, MessageSquare, Bell, Building2 } from 'lucide-react';
 
 function formatCurrency(n: number) {
@@ -18,26 +22,64 @@ function formatCurrency(n: number) {
 export function AdminDashboard() {
   const navigate = useNavigate();
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [users, setUsers] = useState<StaffAccount[]>([]);
+  const [salesReports, setSalesReports] = useState<SalesReport[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [pendingExpenseCount, setPendingExpenseCount] = useState(0);
+  const [todayRevenue, setTodayRevenue] = useState(0);
 
-  const accounts = getAccounts();
-  const activeUsers = accounts.filter((a) => a.status === 'active').length;
-  const branches = new Set(accounts.map((a) => a.branch).filter(Boolean)).size;
-  const pendingApprovals = getPendingExpenseCount();
-  const dailyRevenue = getTodayRevenue();
-  const bankPortals = AVAILABLE_BANKS;
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const [usersData, salesData, expensesData] = await Promise.all([
+          api.get('/users'),
+          api.get('/sales-reports'),
+          api.get('/expenses'),
+        ]);
+        setUsers(usersData);
+        setSalesReports(salesData);
+        setExpenses(expensesData);
 
-  // Recent activity: last 5 records across sales + expenses
-  const recentSales = getSalesReports().slice(0, 3).map((r) => ({
+        const pendingExpenses = expensesData.filter((e: Expense) => e.status === 'PENDING').length;
+        
+        // Improved date handling for revenue
+        const today = new Date().toISOString().split('T')[0];
+        const dailyRev = salesData
+          .filter((r: SalesReport) => r.date === today)
+          .reduce((sum: number, r: SalesReport) => sum + r.totalSales, 0);
+
+        setPendingExpenseCount(pendingExpenses);
+        setTodayRevenue(dailyRev);
+      } catch (error) {
+        console.error('Failed to fetch admin dashboard data:', error);
+        toast.error('Failed to load dashboard data.');
+      }
+    };
+    fetchDashboardData();
+  }, []);
+
+  const activeUsers = users.filter((a) => a.status === 'ACTIVE').length;
+  const branches = new Set(users.map((a) => a.branch).filter(Boolean)).size;
+  const pendingApprovals = pendingExpenseCount;
+  const dailyRevenue = todayRevenue;
+  const bankPortals = AVAILABLE_BANKS; // Still using local for now, but should be fetched from backend
+
+  // Fix: Combine, sort by date/time, then slice for a true "Recent" feed
+  const recentSales = salesReports.map((r) => ({
     action: 'Sales report submitted',
     detail: `${r.branch} — ${formatCurrency(r.totalSales)}`,
-    time: new Date(r.submittedAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' }),
+    timestamp: new Date(r.submittedAt).getTime(),
+    displayTime: new Date(r.submittedAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' }),
   }));
-  const recentExpenses = getExpenses().slice(0, 3).map((e) => ({
-    action: `Expense ${e.status === 'pending' ? 'submitted' : e.status}`,
+  const recentExpenses = expenses.map((e) => ({
+    action: `Expense ${e.status === 'PENDING' ? 'submitted' : e.status}`,
     detail: `${e.branch} — ${e.type}`,
-    time: e.date,
+    timestamp: new Date(e.date).getTime(),
+    displayTime: e.date,
   }));
+
   const recentActivity = [...recentSales, ...recentExpenses]
+    .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 5);
 
   const handleLogout = () => {
@@ -46,7 +88,7 @@ export function AdminDashboard() {
   };
 
   const stats = [
-    { label: 'Total Branches', value: String(branches), icon: FileText, color: 'bg-blue-500' },
+    { label: 'Total Branches', value: String(branches), icon: Building2, color: 'bg-blue-500' },
     { label: 'Active Users', value: String(activeUsers), icon: Users, color: 'bg-green-500' },
     { label: 'Pending Approvals', value: String(pendingApprovals), icon: Bell, color: 'bg-yellow-500' },
     { label: 'Today\'s Revenue', value: dailyRevenue > 0 ? formatCurrency(dailyRevenue) : '₦0', icon: TrendingUp, color: 'bg-primary' },
@@ -54,7 +96,7 @@ export function AdminDashboard() {
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="admin" onLogout={handleLogout} />
+      <Sidebar role="ADMIN" onLogout={handleLogout} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
@@ -84,16 +126,14 @@ export function AdminDashboard() {
         <main className="p-6">
           {/* Stats Grid */}
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            {stats.map((stat, index) => (
-              <div key={index} className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className={`w-12 h-12 ${stat.color} rounded-lg flex items-center justify-center`}>
-                    <stat.icon className="w-6 h-6 text-white" />
-                  </div>
-                </div>
-                <p className="text-gray-400 text-sm mb-1">{stat.label}</p>
-                <p className="text-3xl font-bold text-white">{stat.value}</p>
-              </div>
+            {stats.map((stat, i) => (
+              <StatCard
+                key={i}
+                label={stat.label}
+                value={stat.value}
+                icon={stat.icon}
+                color={stat.color}
+              />
             ))}
           </div>
 
@@ -148,7 +188,7 @@ export function AdminDashboard() {
                       <p className="text-white font-medium">{item.action}</p>
                       <p className="text-gray-400 text-sm">{item.detail}</p>
                     </div>
-                    <span className="text-gray-500 text-sm">{item.time}</span>
+                    <span className="text-gray-500 text-sm">{item.displayTime}</span>
                   </div>
                 ))}
               </div>

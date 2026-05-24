@@ -1,5 +1,5 @@
 interface RoleBadgeProps {
-  role: 'admin' | 'manager' | 'accountant' | 'auditor';
+  role: 'admin' | 'manager' | 'accountant' | 'auditor' | 'ADMIN' | 'MANAGER' | 'ACCOUNTANT' | 'AUDITOR'; // Allow both casings for now
   size?: 'sm' | 'md' | 'lg';
 }
 
@@ -15,6 +15,10 @@ export function RoleBadge({ role, size = 'md' }: RoleBadgeProps) {
     manager: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
     accountant: 'bg-green-500/10 text-green-500 border-green-500/20',
     auditor: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+    ADMIN: 'bg-purple-500/10 text-purple-500 border-purple-500/20', // Explicitly add uppercase
+    MANAGER: 'bg-blue-500/10 text-blue-500 border-blue-500/20', // Explicitly add uppercase
+    ACCOUNTANT: 'bg-green-500/10 text-green-500 border-green-500/20', // Explicitly add uppercase
+    AUDITOR: 'bg-orange-500/10 text-orange-500 border-orange-500/20', // Explicitly add uppercase
   };
 
   const labels = {
@@ -22,6 +26,10 @@ export function RoleBadge({ role, size = 'md' }: RoleBadgeProps) {
     manager: 'Manager',
     accountant: 'Accountant',
     auditor: 'Auditor',
+    ADMIN: 'Super Admin', // Explicitly add uppercase
+    MANAGER: 'Manager', // Explicitly add uppercase
+    ACCOUNTANT: 'Accountant', // Explicitly add uppercase
+    AUDITOR: 'Auditor', // Explicitly add uppercase
   };
 
   return (

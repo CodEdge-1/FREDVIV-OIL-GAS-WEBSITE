@@ -1,51 +1,67 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { StatusBadge } from '../../components/dashboard/StatusBadge';
-import { logout, getSession, getAccounts } from '../../lib/auth';
-import { getExpenses, saveExpense, addNotification, type Expense } from '../../lib/store';
+import { logout, getSession, StaffAccount } from '../../lib/auth';
+import { api } from '../../lib/api';
+import { type Expense } from '../../lib/store'; // Keep type for now, will replace with backend type
 import { Plus, Receipt } from 'lucide-react';
 
 export function ManagerExpenses() {
   const navigate = useNavigate();
 
   const session = getSession();
-  const account = session ? getAccounts().find((a) => a.id === session.id) : null;
-  const branchName = account?.branch || 'My Branch';
+  const [account, setAccount] = useState<StaffAccount | null>(null);
+  const branchName = account?.branch || 'N/A';
+
+  useEffect(() => {
+    const fetchAccount = async () => {
+      if (!session?.id) return;
+      try {
+        const userData = await api.get(`/users/${session.id}`);
+        setAccount(userData);
+      } catch (error) {
+        console.error('Failed to fetch account data:', error);
+      }
+    };
+    fetchAccount();
+  }, [session?.id]);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newExpense, setNewExpense] = useState({ type: 'Equipment Maintenance', description: '', amount: '' });
 
-  // Only show this manager's expenses
-  const [expenses, setExpenses] = useState<Expense[]>(() =>
-    session ? getExpenses().filter((e) => e.managerId === session.id) : []
-  );
+  const [expenses, setExpenses] = useState<Expense[]>([]); // Initialize with empty array
 
-  const handleSubmitExpense = (e: React.FormEvent) => {
-    e.preventDefault();
+  const fetchExpenses = async () => {
+    if (!session?.id) return;
+    try {
+      const data = await api.get(`/expenses/manager/${session.id}`); // Assuming an endpoint for manager's expenses
+      setExpenses(data);
+    } catch (error) {
+      console.error('Failed to fetch expenses:', error);
+      toast.error('Failed to load expenses.');
+    }
+  };
+
+  useEffect(() => {
+    fetchExpenses();
+  }, [session?.id]);
+
+  const handleSubmitExpense = async (e: React.FormEvent) => {
+    e.preventDefault(); // Explicitly type e
     if (!newExpense.description || !newExpense.amount || !session) return;
-    const expense: Expense = {
-      id: `EXP-${Date.now()}`,
-      managerId: session.id,
-      managerName: session.name,
-      branch: branchName,
-      type: newExpense.type,
-      description: newExpense.description,
-      amount: Number(newExpense.amount),
-      date: new Date().toISOString().split('T')[0],
-      status: 'pending',
-    };
-    saveExpense(expense);
-    addNotification({
-      recipientId: 'admin',
-      title: 'New Expense Request',
-      body: `${session.name} (${branchName}) submitted a ${expense.type} expense for ${formatCurrency(expense.amount)}`,
-    });
-    setExpenses(getExpenses().filter((ex) => ex.managerId === session.id));
-    toast.success('Expense submitted', { description: 'Awaiting admin approval.' });
-    setShowCreateModal(false);
-    setNewExpense({ type: 'Equipment Maintenance', description: '', amount: '' });
+
+    try {
+      await api.post('/expenses', { ...newExpense, amount: Number(newExpense.amount), managerId: session.id, branch: branchName, status: 'PENDING' });
+      toast.success('Expense submitted', { description: 'Awaiting admin approval.' });
+      setShowCreateModal(false);
+      setNewExpense({ type: 'Equipment Maintenance', description: '', amount: '' });
+      fetchExpenses(); // Reload expenses
+    } catch (error) {
+      console.error('Failed to submit expense:', error);
+      toast.error('Failed to submit expense.');
+    }
   };
 
   const formatCurrency = (amount: number) =>
@@ -53,7 +69,7 @@ export function ManagerExpenses() {
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="manager" onLogout={() => { logout(); navigate('/staff/login'); }} />
+      <Sidebar role="MANAGER" onLogout={() => { logout(); navigate('/staff/login'); }} /> {/* Sidebar role prop updated to uppercase */}
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">

@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
-import { getSalesReports, type SalesReport } from '../../lib/store';
+import { api } from '../../lib/api';
+import { toast } from 'sonner';
+import { type SalesReport } from '../../lib/store'; // Keep type for now, will replace with backend type
 import {
   ClipboardCheck,
   AlertTriangle,
@@ -14,9 +16,9 @@ import {
   FileText,
 } from 'lucide-react';
 
-type AuditStatus = 'pending' | 'audited' | 'flagged';
+type AuditStatus = 'PENDING' | 'APPROVED' | 'REJECTED'; // Align with Prisma Status enum
 
-interface AuditReport extends SalesReport {
+interface AuditReport extends SalesReport { // This type will need to be aligned with backend AuditReport
   auditStatus: AuditStatus;
   auditNote?: string;
 }
@@ -25,17 +27,17 @@ const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 0 }).format(amount);
 
 function AuditStatusBadge({ status }: { status: AuditStatus }) {
-  const styles = {
-    pending: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20',
-    audited: 'bg-green-500/10 text-green-400 border border-green-500/20',
-    flagged: 'bg-red-500/10 text-red-400 border border-red-500/20',
+  const styles: Record<AuditStatus, string> = { // Explicitly type styles
+    PENDING: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20',
+    APPROVED: 'bg-green-500/10 text-green-400 border border-green-500/20',
+    REJECTED: 'bg-red-500/10 text-red-400 border border-red-500/20',
   };
-  const labels = { pending: 'Pending Review', audited: 'Audited', flagged: 'Flagged' };
+  const labels: Record<AuditStatus, string> = { PENDING: 'Pending Review', APPROVED: 'Audited', REJECTED: 'Flagged' }; // Update labels
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${styles[status]}`}>
-      {status === 'pending' && <ClipboardCheck className="w-3 h-3" />}
-      {status === 'audited' && <CheckCircle className="w-3 h-3" />}
-      {status === 'flagged' && <AlertTriangle className="w-3 h-3" />}
+      {status === 'PENDING' && <ClipboardCheck className="w-3 h-3" />}
+      {status === 'APPROVED' && <CheckCircle className="w-3 h-3" />}
+      {status === 'REJECTED' && <AlertTriangle className="w-3 h-3" />}
       {labels[status]}
     </span>
   );
@@ -44,27 +46,47 @@ function AuditStatusBadge({ status }: { status: AuditStatus }) {
 export function AuditorReports() {
   const navigate = useNavigate();
 
-  const [reports, setReports] = useState<AuditReport[]>(() =>
-    getSalesReports().map((r) => ({ ...r, auditStatus: 'pending' as AuditStatus }))
-  );
+  const [reports, setReports] = useState<AuditReport[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | AuditStatus>('all');
   const [flagModal, setFlagModal] = useState<AuditReport | null>(null);
   const [flagNote, setFlagNote] = useState('');
 
-  const handleMarkAudited = (id: string) => {
-    setReports((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, auditStatus: 'audited', auditNote: undefined } : r))
-    );
+  const fetchReports = async () => {
+    try {
+      const data = await api.get('/sales-reports/audit'); // Assuming an endpoint for audit reports
+      // Map backend status to frontend AuditStatus if necessary
+      setReports(data.map((r: any) => ({ ...r, auditStatus: r.auditStatus || 'PENDING' }))); // Update default status
+    } catch (error) {
+      console.error('Failed to fetch audit reports:', error);
+      toast.error('Failed to load audit reports.');
+    }
   };
 
-  const handleFlag = () => {
+  useEffect(() => {
+    fetchReports();
+  }, []);
+
+  const handleMarkAudited = async (id: string) => {
+    try {
+      await api.patch(`/sales-reports/${id}/audit`, { auditStatus: 'APPROVED' }); // Update status to APPROVED
+      fetchReports(); // Re-fetch to update UI
+    } catch (error) {
+      toast.error('Failed to mark report as audited.');
+    }
+  };
+
+  const handleFlag = async () => {
     if (!flagModal) return;
-    setReports((prev) =>
-      prev.map((r) => (r.id === flagModal.id ? { ...r, auditStatus: 'flagged', auditNote: flagNote } : r))
-    );
-    setFlagModal(null);
-    setFlagNote('');
+    try {
+      await api.patch(`/sales-reports/${flagModal.id}/audit`, { auditStatus: 'REJECTED', auditNote: flagNote }); // Update status to REJECTED
+      toast.success('Report flagged successfully.');
+      setFlagModal(null);
+      setFlagNote('');
+      fetchReports(); // Re-fetch to update UI
+    } catch (error) {
+      toast.error('Failed to flag report.');
+    }
   };
 
   const filtered = reports.filter((r) => {
@@ -72,13 +94,13 @@ export function AuditorReports() {
       r.branch.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.managerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || r.auditStatus === statusFilter;
+    const matchesStatus = statusFilter === 'all' || r.auditStatus === statusFilter; // Status filter will use uppercase
     return matchesSearch && matchesStatus;
   });
 
   return (
-    <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="auditor" onLogout={() => navigate('/staff/login')} />
+    <div className="flex min-h-screen bg-gray-900"> {/* Updated role prop below */}
+      <Sidebar role="AUDITOR" onLogout={() => navigate('/staff/login')} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
@@ -129,9 +151,9 @@ export function AuditorReports() {
                     className="px-3 py-2.5 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   >
                     <option value="all">All Statuses</option>
-                    <option value="pending">Pending Review</option>
-                    <option value="audited">Audited</option>
-                    <option value="flagged">Flagged</option>
+                    <option value="PENDING">Pending Review</option>
+                    <option value="APPROVED">Audited</option>
+                    <option value="REJECTED">Flagged</option>
                   </select>
                 </div>
               </div>
@@ -208,7 +230,7 @@ export function AuditorReports() {
                             )}
                           </td>
                           <td className="px-5 py-4">
-                            {report.auditStatus === 'pending' && (
+                            {report.auditStatus === 'PENDING' && (
                               <div className="flex gap-2">
                                 <button
                                   onClick={() => handleMarkAudited(report.id)}
@@ -226,10 +248,10 @@ export function AuditorReports() {
                                 </button>
                               </div>
                             )}
-                            {report.auditStatus === 'audited' && (
+                            {report.auditStatus === 'APPROVED' && (
                               <span className="text-xs text-gray-500">No action needed</span>
                             )}
-                            {report.auditStatus === 'flagged' && (
+                            {report.auditStatus === 'REJECTED' && (
                               <button
                                 onClick={() => handleMarkAudited(report.id)}
                                 className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 text-gray-300 border border-gray-600 text-xs font-medium rounded-lg hover:bg-gray-600 transition-colors"

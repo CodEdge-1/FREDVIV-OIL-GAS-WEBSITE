@@ -5,8 +5,15 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { IsString } from 'class-validator';
+import { Role } from '@prisma/client'; // Import Role enum
+import { IsEnum } from 'class-validator';
 
 class CreateBalanceRequestDto {
+  @IsEnum(Role)
+  role: Role;
+}
+
+class ValidatePinDto {
   @IsString()
   pin: string;
 }
@@ -34,7 +41,7 @@ export class BalanceRequestsController {
   @Roles('ACCOUNTANT', 'AUDITOR')
   @Post()
   create(@CurrentUser() user: any, @Body() dto: CreateBalanceRequestDto) {
-    return this.balanceRequestsService.create(user.id, dto.pin);
+    return this.balanceRequestsService.create(user.id, dto.role);
   }
 
   @UseGuards(RolesGuard)
@@ -42,5 +49,12 @@ export class BalanceRequestsController {
   @Patch(':id/approve')
   approve(@Param('id') id: string, @CurrentUser() user: any) {
     return this.balanceRequestsService.approve(id, user.id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ACCOUNTANT', 'AUDITOR')
+  @Post(':id/validate')
+  validate(@Param('id') id: string, @CurrentUser() user: any, @Body() dto: ValidatePinDto) {
+    return this.balanceRequestsService.validatePin(id, user.id, dto.pin);
   }
 }

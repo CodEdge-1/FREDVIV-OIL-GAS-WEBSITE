@@ -1,36 +1,52 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
-import { logout, getSession } from '../../lib/auth';
+import { logout, getSession, StaffAccount } from '../../lib/auth'; // Keep StaffAccount type for now
 import { CountdownTimer } from '../../components/dashboard/CountdownTimer';
 import {
-  getSalesReports,
-  saveBalanceRequest,
-  getPendingBalanceRequest,
-  getApprovedBalanceRequest,
-  updateBalanceRequest,
-  addNotification,
-  type BalanceRequest,
+  type SalesReport, // Keep type for now, will replace with backend type
+} from '../../lib/store'; // Remove local storage functions
+import { api } from '../../lib/api';
+import { toast } from 'sonner';
+import {
+  type BalanceRequest, // Keep type for now, will replace with backend type from lib/store
 } from '../../lib/store';
 import { Eye, Lock, KeyRound } from 'lucide-react';
 
 export function AccountantDashboard() {
   const navigate = useNavigate();
   const session = getSession();
-
-  const accountBalance = getSalesReports().reduce((sum, r) => sum + r.totalSales, 0);
-
-  const [pendingRequest, setPendingRequest] = useState<BalanceRequest | null>(
-    () => session ? getPendingBalanceRequest(session.id) : null
-  );
-  const [approvedRequest, setApprovedRequest] = useState<BalanceRequest | null>(
-    () => session ? getApprovedBalanceRequest(session.id) : null
-  );
+  const [allReports, setAllReports] = useState<SalesReport[]>([]);
+  const [pendingRequest, setPendingRequest] = useState<BalanceRequest | null>(null);
+  const [approvedRequest, setApprovedRequest] = useState<BalanceRequest | null>(null);
   const [showPinEntry, setShowPinEntry] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [balanceVisible, setBalanceVisible] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const accountBalance = allReports.reduce((sum, r) => sum + r.totalSales, 0);
+
+  const fetchDashboardData = async () => {
+    if (!session?.id) return;
+    try {
+      const [reportsData, pendingReqData, approvedReqData] = await Promise.all([
+        api.get('/sales-reports'), // Assuming endpoint for all sales reports
+        api.get(`/balance-requests/pending/${session.id}`), // Assuming endpoint for user's pending balance request
+        api.get(`/balance-requests/approved/${session.id}`), // Assuming endpoint for user's approved balance request
+      ]);
+      setAllReports(reportsData);
+      setPendingRequest(pendingReqData);
+      setApprovedRequest(approvedReqData);
+    } catch (error) {
+      console.error('Failed to fetch accountant dashboard data:', error);
+      toast.error('Failed to load dashboard data.');
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [session?.id]);
 
   // Poll localStorage every 3s while a pending request exists
   useEffect(() => {
@@ -38,54 +54,58 @@ export function AccountantDashboard() {
 
     if (pendingRequest) {
       pollRef.current = setInterval(() => {
-        const approved = getApprovedBalanceRequest(session.id);
-        if (approved) {
-          setPendingRequest(null);
-          setApprovedRequest(approved);
-          setShowPinEntry(true);
-          clearInterval(pollRef.current!);
-        }
+        // Poll API for approved request status
+        api.get(`/balance-requests/approved/${session.id}`).then(approved => {
+          if (approved) {
+            setPendingRequest(null);
+            setApprovedRequest(approved);
+            setShowPinEntry(true);
+            clearInterval(pollRef.current!);
+          }
+        }).catch(err => console.error('Polling for approved request failed:', err));
       }, 3000);
     }
 
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [pendingRequest]);
 
-  const handleRequestBalance = () => {
+  const handleRequestBalance = async () => {
     if (!session) return;
-    const now = new Date().toLocaleString('en-US', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hour12: true,
-    });
-    const req: BalanceRequest = {
-      id: `BAL-${Date.now()}`,
-      requesterId: session.id,
-      requester: session.name,
-      role: 'accountant',
-      requestTime: now,
-      status: 'pending',
-    };
-    saveBalanceRequest(req);
-    addNotification({
-      recipientId: 'admin',
-      title: 'Balance Request Submitted',
-      body: `${session.name} (Accountant) has requested access to view the account balance.`,
-    });
-    setPendingRequest(req);
+    try {
+      const newRequest = await api.post('/balance-requests', {
+        requesterId: session.id,
+        requester: session.name,
+        role: 'ACCOUNTANT', // Ensure role matches Prisma enum
+        status: 'PENDING', // Ensure status matches Prisma enum
+      });
+      toast.success('Balance request submitted to admin.');
+      setPendingRequest(newRequest);
+      // Fix: Let the backend handle routing notifications to all admins
+      await api.post('/notifications/admin-alert', {
+        title: 'Balance Request Submitted',
+        body: `${session.name} (Accountant) has requested access to view the account balance.`,
+      });
+    } catch (error) {
+      console.error('Failed to submit balance request:', error);
+      toast.error('Failed to submit balance request.');
+    }
   };
 
-  const handlePinSubmit = () => {
+  const handlePinSubmit = async () => {
     if (!approvedRequest) return;
-    if (pinInput === approvedRequest.adminPin) {
-      updateBalanceRequest(approvedRequest.id, { pinUsed: true });
+    try {
+      // Use the new backend validation endpoint
+      await api.post(`/balance-requests/${approvedRequest.id}/validate`, { pin: pinInput });
+      
       setShowPinEntry(false);
       setPinInput('');
       setPinError('');
       setApprovedRequest(null);
       setPendingRequest(null);
       setBalanceVisible(true);
-    } else {
-      setPinError('Incorrect PIN. Please check with admin and try again.');
+      toast.success('Balance unlocked!');
+    } catch (error: any) {
+      setPinError(error.response?.data?.message || 'Incorrect PIN.');
     }
   };
 
@@ -98,7 +118,7 @@ export function AccountantDashboard() {
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="accountant" onLogout={() => { logout(); navigate('/staff/login'); }} />
+      <Sidebar role="ACCOUNTANT" onLogout={() => { logout(); navigate('/staff/login'); }} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">

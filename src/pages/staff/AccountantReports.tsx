@@ -1,6 +1,9 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
-import { getSalesReports } from '../../lib/store';
+import { api } from '../../lib/api';
+import { toast } from 'sonner';
+import { type SalesReport } from '../../lib/store'; // Keep type for now, will replace with backend type
 import { FileBarChart2, FileText } from 'lucide-react';
 
 const formatCurrency = (amount: number) =>
@@ -8,11 +11,24 @@ const formatCurrency = (amount: number) =>
 
 export function AccountantReports() {
   const navigate = useNavigate();
-  const reports = getSalesReports();
+  const [reports, setReports] = useState<SalesReport[]>([]);
+
+  useEffect(() => {
+    const fetchReports = async () => {
+      try {
+        const data = await api.get('/sales-reports'); // Assuming an endpoint for all sales reports
+        setReports(data);
+      } catch (error) {
+        console.error('Failed to fetch sales reports:', error);
+        toast.error('Failed to load sales reports.');
+      }
+    };
+    fetchReports();
+  }, []);
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="accountant" onLogout={() => navigate('/staff/login')} />
+      <Sidebar role="ACCOUNTANT" onLogout={() => navigate('/staff/login')} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">

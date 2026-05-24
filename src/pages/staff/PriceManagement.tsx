@@ -1,37 +1,74 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
-import { logout, getAccounts } from '../../lib/auth';
-import { getPrices, savePrices, getPriceHistory, addNotification, addActivityLog, type PriceHistory } from '../../lib/store';
+import { logout, StaffAccount } from '../../lib/auth'; // Keep StaffAccount type for now
+import { api } from '../../lib/api';
+import { toast } from 'sonner';
+import { type PriceHistory } from '../../lib/store'; // Keep type for now, will replace with backend type
 import { Fuel, Droplet, Save, History, Check } from 'lucide-react';
 
 export function PriceManagement() {
   const navigate = useNavigate();
-  const currentPrices = getPrices();
-  const [pmsPrice, setPmsPrice] = useState(currentPrices.pms);
-  const [agoPrice, setAgoPrice] = useState(currentPrices.ago);
+  const [currentPrices, setCurrentPrices] = useState({ pms: 0, ago: 0 });
+  const [pmsPrice, setPmsPrice] = useState(0);
+  const [agoPrice, setAgoPrice] = useState(0);
   const [saved, setSaved] = useState(false);
-  const [priceHistory, setPriceHistory] = useState<PriceHistory[]>(getPriceHistory);
+  const [priceHistory, setPriceHistory] = useState<PriceHistory[]>([]);
+  const [managers, setManagers] = useState<StaffAccount[]>([]);
 
-  const handleSave = () => {
-    savePrices({ pms: pmsPrice, ago: agoPrice });
-    setPriceHistory(getPriceHistory());
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
-    addActivityLog({ action: `Price updated — PMS ₦${pmsPrice}/L · AGO ₦${agoPrice}/L`, type: 'price' });
-    const managers = getAccounts().filter((a) => a.role === 'manager');
-    managers.forEach((m) =>
-      addNotification({
-        recipientId: m.id,
-        title: 'Fuel Price Updated',
-        body: `New prices: PMS ₦${pmsPrice}/L · AGO ₦${agoPrice}/L. Update your sales entries accordingly.`,
-      })
-    );
+  const fetchPricesAndHistory = async () => {
+    try {
+      const [pricesData, historyData, usersData] = await Promise.all([
+        api.get('/prices'), // Assuming an endpoint for current prices
+        api.get('/price-history'), // Assuming an endpoint for price history
+        api.get('/users'), // To get managers for notifications
+      ]);
+      setCurrentPrices(pricesData);
+      setPmsPrice(pricesData.pms);
+      setAgoPrice(pricesData.ago);
+      setPriceHistory(historyData);
+      setManagers(usersData.filter((u: any) => u.role === 'MANAGER'));
+    } catch (error) {
+      console.error('Failed to fetch price data:', error);
+      toast.error('Failed to load price data.');
+    }
+  };
+
+  useEffect(() => {
+    fetchPricesAndHistory();
+  }, []);
+
+  const handleSave = async () => {
+    try {
+      await api.patch('/prices', { pms: pmsPrice, ago: agoPrice }); // Assuming an endpoint to update prices
+      toast.success('Prices updated successfully!');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+      // Add activity log via API
+      await api.post('/activity-logs', {
+        userId: 'admin', // Assuming 'admin' is the ID for the admin user
+        action: `Price updated — PMS ₦${pmsPrice}/L · AGO ₦${agoPrice}/L`,
+        type: 'price',
+        details: `Old PMS: ₦${currentPrices.pms}/L, Old AGO: ₦${currentPrices.ago}/L`,
+      });
+      // Send notifications to managers via API
+      managers.forEach(async (m) => {
+        await api.post('/notifications', {
+          userId: m.id,
+          title: 'Fuel Price Updated',
+          body: `New prices: PMS ₦${pmsPrice}/L · AGO ₦${agoPrice}/L. Update your sales entries accordingly.`,
+        });
+      });
+      fetchPricesAndHistory(); // Re-fetch to update current prices and history
+    } catch (error) {
+      console.error('Failed to save prices:', error);
+      toast.error('Failed to save prices.');
+    }
   };
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="admin" onLogout={() => { logout(); navigate('/staff/login'); }} />
+      <Sidebar role="ADMIN" onLogout={() => { logout(); navigate('/staff/login'); }} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">

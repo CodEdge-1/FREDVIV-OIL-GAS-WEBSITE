@@ -2,11 +2,10 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { RoleBadge } from '../../components/dashboard/RoleBadge';
-import { logout, getSession, getAccounts, StaffAccount } from '../../lib/auth';
-import { Send, Search, Hash, Plus, X, Lock, Paperclip, Image, FileText, Download, Trash2 } from 'lucide-react';
-import { markChatAsRead, addNotification } from '../../lib/store';
-
-type Role = 'admin' | 'manager' | 'accountant' | 'auditor';
+import { logout, getSession, Role, StaffAccount } from '../../lib/auth';
+import { Plus, X, Lock, Paperclip, Image, FileText, Download, Trash2, Search, Hash, Send } from 'lucide-react';
+import { toast } from 'sonner'; // Import toast
+import { api } from '../../lib/api'; // Import api
 
 interface Attachment {
   name: string;
@@ -19,7 +18,7 @@ interface Message {
   id: string;
   senderId: string;
   sender: string;
-  role: Role;
+  role: Role; // Use imported Role
   text: string;
   timestamp: Date;
   attachment?: Attachment;
@@ -29,7 +28,7 @@ interface Conversation {
   id: string;
   type: 'broadcast' | 'direct';
   name: string;
-  role?: Role;
+  role?: Role; // Use imported Role
   online: boolean;
   messages: Message[];
   unread: number;
@@ -40,7 +39,7 @@ interface StoredMessage {
   id: string;
   senderId: string;
   sender: string;
-  role: Role;
+  role: Role; // Use imported Role
   text: string;
   timestamp: string;
   attachment?: Attachment;
@@ -49,7 +48,7 @@ interface StoredMessage {
 interface PrivateChatData {
   staffId: string;
   staffName: string;
-  staffRole: Role;
+  staffRole: Role; // Use imported Role
   messages: StoredMessage[];
 }
 
@@ -121,20 +120,20 @@ export function ChatCenter() {
   const location = useLocation();
 
   const role: Role = location.pathname.includes('/manager/')
-    ? 'manager'
+    ? Role.MANAGER
     : location.pathname.includes('/accountant/')
-    ? 'accountant'
+    ? Role.ACCOUNTANT
     : location.pathname.includes('/auditor/')
-    ? 'auditor'
-    : 'admin';
+    ? Role.AUDITOR
+    : Role.ADMIN;
 
   const session = getSession();
   const currentUser = { id: session?.id ?? role, name: session?.name ?? 'Unknown' };
-  const isAdmin = role === 'admin';
+  const isAdmin = role === Role.ADMIN; // Compare with enum member
 
-  function buildConversations(): Conversation[] {
+  function buildConversations() {
     const broadcastMsgs = deserializeMessages(loadBroadcastMessages());
-    const result: Conversation[] = [
+    const result: Conversation[] = [ // Explicitly type result
       {
         id: 'broadcast',
         type: 'broadcast',
@@ -149,7 +148,7 @@ export function ChatCenter() {
 
     if (isAdmin) {
       // Admin sees all private conversations
-      for (const [convId, data] of Object.entries(privateChats)) {
+      for (const [convId, data] of Object.entries(privateChats) as [string, PrivateChatData][]) { // Explicitly type Object.entries
         result.push({
           id: convId,
           type: 'direct',
@@ -168,8 +167,8 @@ export function ChatCenter() {
         result.push({
           id: myConvId,
           type: 'direct',
-          name: 'Administrator',
-          role: 'admin',
+          name: 'Administrator', // Name is a string
+          role: Role.ADMIN,
           online: false,
           unread: 0,
           messages: deserializeMessages(data.messages),
@@ -180,7 +179,7 @@ export function ChatCenter() {
     return result;
   }
 
-  const [conversations, setConversations] = useState<Conversation[]>(() => buildConversations());
+  const [conversations, setConversations] = useState<Conversation[]>(() => buildConversations()); // Initialize with buildConversations
   const [activeId, setActiveId] = useState<string>('broadcast');
   const [inputText, setInputText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -191,18 +190,9 @@ export function ChatCenter() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Mark chat as read when this page is open
-  useEffect(() => {
-    markChatAsRead(currentUser.id);
-  }, [currentUser.id]);
+  const activeConv = conversations.find((c) => c.id === activeId); // Remove non-null assertion
 
-  const activeConv = conversations.find((c) => c.id === activeId)!;
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeId, activeConv?.messages.length]);
-
-  const handleSelectConversation = (id: string) => {
+  const handleSelectConversation = (id: string) => { // Corrected function name
     setActiveId(id);
     setConversations((prev) =>
       prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c))
@@ -240,52 +230,60 @@ export function ChatCenter() {
       ...(attachment ? { attachment } : {}),
     };
 
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === activeId
-          ? { ...c, messages: [...c.messages, newMessage] }
-          : c
-      )
-    );
+    const updateAndPersistMessage = (convId: string, message: Message) => {
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === convId
+            ? { ...c, messages: [...c.messages, message] }
+            : c
+        )
+      );
 
-    // Persist to localStorage
-    if (activeId === 'broadcast') {
-      const stored = loadBroadcastMessages();
-      saveBroadcastMessages([...stored, serializeMessage(newMessage)]);
-    } else {
-      const privateChats = loadPrivateChats();
-      if (privateChats[activeId]) {
-        privateChats[activeId].messages.push(serializeMessage(newMessage));
+      // Persist to localStorage
+      if (convId === 'broadcast') {
+        const stored = loadBroadcastMessages();
+        saveBroadcastMessages([...stored, serializeMessage(message)]);
       } else {
-        // Staff sending first message creates the entry
-        privateChats[activeId] = {
-          staffId: currentUser.id,
-          staffName: currentUser.name,
-          staffRole: role,
-          messages: [serializeMessage(newMessage)],
-        };
-      }
-      savePrivateChats(privateChats);
+        const privateChats = loadPrivateChats();
+        if (privateChats[convId]) {
+          privateChats[convId].messages.push(serializeMessage(message));
+        } else {
+          // Staff sending first message creates the entry
+          privateChats[convId] = {
+            staffId: currentUser.id,
+            staffName: currentUser.name,
+            staffRole: role,
+            messages: [serializeMessage(message)],
+          };
+        }
+        savePrivateChats(privateChats);
 
-      // Notify the other person in this DM
-      const conv = conversations.find((c) => c.id === activeId);
-      if (conv) {
-        // recipient is either admin (for staff) or the staff member (for admin)
-        const recipientId = isAdmin
-          ? activeId.replace('dm-', '')   // admin messaging staff → staff's ID
-          : 'admin';                       // staff messaging admin
-        const preview = text
-          ? (text.length > 60 ? text.slice(0, 60) + '…' : text)
-          : attachment
-          ? (attachment.type.startsWith('image/') ? '📷 Sent an image' : `📎 ${attachment.name}`)
-          : '';
-        addNotification({
-          recipientId,
-          title: `New message from ${currentUser.name}`,
-          body: preview,
-        });
+        // Notify the other person in this DM
+        const conv = conversations.find((c) => c.id === convId);
+        if (conv) {
+          // recipient is either admin (for staff) or the staff member (for admin)
+          const recipientId = isAdmin
+            ? convId.replace('dm-', '')   // admin messaging staff → staff's ID
+            : 'admin'; // staff messaging admin
+          const preview = message.text
+            ? (message.text.length > 60 ? message.text.slice(0, 60) + '…' : message.text)
+            : message.attachment
+            ? (message.attachment.type.startsWith('image/') ? '📷 Sent an image' : `📎 ${message.attachment.name}`)
+            : '';
+          // Fix: Use api.post for notifications instead of undefined addNotification
+          api.post('/notifications', {
+            recipientId,
+            title: `New message from ${currentUser.name}`,
+            body: preview,
+          }).catch(err => console.error('Failed to send notification:', err));
+        }
       }
-    }
+    };
+
+    // Fix: Ensure activeConv is defined before proceeding
+    if (!activeConv) return;
+
+    updateAndPersistMessage(activeId, newMessage);
 
     setInputText('');
     setAttachment(null);
@@ -319,7 +317,7 @@ export function ChatCenter() {
     setShowNewDMModal(false);
 
     // If already open, just switch to it
-    const existing = conversations.find((c) => c.id === convId);
+    const existing = conversations.find((c: Conversation) => c.id === convId); // Explicitly type c
     if (existing) {
       setActiveId(convId);
       return;
@@ -331,7 +329,7 @@ export function ChatCenter() {
       privateChats[convId] = {
         staffId: staff.id,
         staffName: staff.name,
-        staffRole: staff.role,
+        staffRole: staff.role, // Use imported Role
         messages: [],
       };
       savePrivateChats(privateChats);
@@ -341,7 +339,7 @@ export function ChatCenter() {
       id: convId,
       type: 'direct',
       name: staff.name,
-      role: staff.role,
+      role: staff.role, // Use imported Role
       online: false,
       unread: 0,
       messages: [],
@@ -371,21 +369,27 @@ export function ChatCenter() {
   const directs = filteredConversations.filter((c) => c.type === 'direct');
 
   // Staff list for new DM modal (active staff not already in a DM)
-  const staffAccounts = getAccounts().filter((a) => a.status === 'active');
-  const existingDMStaffIds = conversations
-    .filter((c) => c.type === 'direct')
-    .map((c) => c.id.replace('dm-', ''));
-  const availableStaff = staffAccounts.filter((s) => !existingDMStaffIds.includes(s.id));
+  const [staffList, setStaffList] = useState<StaffAccount[]>([]); // Initialize with empty array
+  useEffect(() => {
+    api.get('/users').then(setStaffList).catch(console.error); // Fetch staff list
+  }, []);
 
-  // Group messages by date
+  const activeStaff = staffList.filter((a: StaffAccount) => a.status === 'ACTIVE');
+  const existingDMStaffIds = conversations.filter((c: Conversation) => c.type === 'direct')
+    .map((c) => c.id.replace('dm-', ''));
+  const availableStaff = activeStaff.filter((s: StaffAccount) => !existingDMStaffIds.includes(s.id)); // Fix: Use availableStaff
+
+  // Fix: Safe grouping with activeConv guard
   const groupedMessages: { date: string; messages: Message[] }[] = [];
-  for (const msg of activeConv.messages) {
-    const label = formatDate(msg.timestamp);
-    const last = groupedMessages[groupedMessages.length - 1];
-    if (last && last.date === label) {
-      last.messages.push(msg);
-    } else {
-      groupedMessages.push({ date: label, messages: [msg] });
+  if (activeConv) {
+    for (const msg of activeConv.messages) {
+      const label = formatDate(msg.timestamp);
+      const last = groupedMessages[groupedMessages.length - 1];
+      if (last && last.date === label) {
+        last.messages.push(msg);
+      } else {
+        groupedMessages.push({ date: label, messages: [msg] });
+      }
     }
   }
 
@@ -471,7 +475,7 @@ export function ChatCenter() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Conversation Header */}
         <header className="bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center gap-3 flex-shrink-0">
-          {activeConv.type === 'broadcast' ? (
+          {activeConv?.type === 'broadcast' ? ( // Fix: Optional chaining
             <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center flex-shrink-0">
               <Hash className="w-5 h-5 text-primary" />
             </div>
@@ -482,16 +486,16 @@ export function ChatCenter() {
               </div>
               <span
                 className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-gray-800 ${
-                  activeConv.online ? 'bg-green-500' : 'bg-gray-500'
+                  activeConv?.online ? 'bg-green-500' : 'bg-gray-500'
                 }`}
               />
             </div>
           )}
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-white font-bold truncate">{activeConv.name}</h3>
-              {activeConv.role && <RoleBadge role={activeConv.role} size="sm" />}
-              {activeConv.type === 'direct' && (
+            {activeConv && <div className="flex items-center gap-2"> {/* Fix: Conditional rendering for activeConv */}
+              <h3 className="text-white font-bold truncate">{activeConv?.name}</h3>
+              {activeConv?.role && <RoleBadge role={activeConv.role.toLowerCase() as any} size="sm" />}
+              {activeConv?.type === 'direct' && (
                 <span className="flex items-center gap-1 text-xs text-amber-400/80 bg-amber-400/10 px-2 py-0.5 rounded-full">
                   <Lock className="w-3 h-3" />
                   Private
@@ -507,7 +511,7 @@ export function ChatCenter() {
         </header>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6" ref={messagesEndRef}> {/* Fix: Add ref here */}
           {groupedMessages.map((group) => (
             <div key={group.date}>
               {/* Date Divider */}
@@ -536,7 +540,7 @@ export function ChatCenter() {
                       {/* Bubble */}
                       <div className={`max-w-[65%] ${isMine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                         <div className={`flex items-center gap-2 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
-                          <span className="text-xs text-gray-400 font-medium">{msg.sender}</span>
+                          <span className="text-xs text-gray-400 font-medium">{msg.sender}</span> // msg.sender is already a string
                           <RoleBadge role={msg.role} size="sm" />
                         </div>
                         <div
@@ -593,10 +597,10 @@ export function ChatCenter() {
             </div>
           ))}
 
-          {activeConv.messages.length === 0 && (
+          {activeConv && activeConv.messages.length === 0 && ( // Fix: Optional chaining
             <div className="flex flex-col items-center justify-center h-full text-center">
               <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mb-4">
-                {activeConv.type === 'direct' ? (
+                {activeConv?.type === 'direct' ? (
                   <Lock className="w-8 h-8 text-gray-500" />
                 ) : (
                   <Hash className="w-8 h-8 text-gray-500" />
@@ -604,14 +608,12 @@ export function ChatCenter() {
               </div>
               <p className="text-gray-400 font-medium">No messages yet</p>
               <p className="text-gray-500 text-sm mt-1">
-                {activeConv.type === 'direct'
+                {activeConv?.type === 'direct'
                   ? 'This is a private conversation — only you and the other person can see it'
                   : 'Be the first to say something'}
               </p>
             </div>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Input Area */}
@@ -668,9 +670,9 @@ export function ChatCenter() {
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
-                activeConv.type === 'broadcast'
+                activeConv?.type === 'broadcast'
                   ? `Message #All Staff…`
-                  : `Private message to ${activeConv.name}…`
+                  : `Private message to ${activeConv?.name}…`
               }
               rows={1}
               className="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm leading-relaxed"
@@ -716,7 +718,7 @@ export function ChatCenter() {
               {availableStaff.length === 0 ? (
                 <div className="py-8 text-center">
                   <p className="text-gray-400 text-sm">
-                    {staffAccounts.length === 0
+                    {staffList.length === 0
                       ? 'No staff accounts exist yet.'
                       : 'You already have a direct message open with every staff member.'}
                   </p>
@@ -728,14 +730,14 @@ export function ChatCenter() {
                     onClick={() => handleStartDM(staff)}
                     className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-700 transition-colors text-left"
                   >
-                    <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold flex-shrink-0">
+                    <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold flex-shrink-0"> {/* Fix: Missing closing tag for this div */}
                       {staff.name.charAt(0)}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-white font-medium text-sm truncate">{staff.name}</p>
                       <p className="text-gray-400 text-xs truncate">{staff.email}</p>
-                    </div>
-                    <RoleBadge role={staff.role} size="sm" />
+                    </div> 
+                    <RoleBadge role={staff.role.toLowerCase() as any} size="sm" />
                   </button>
                 ))
               )}

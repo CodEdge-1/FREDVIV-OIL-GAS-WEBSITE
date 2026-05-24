@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { RoleBadge } from '../../components/dashboard/RoleBadge';
@@ -7,14 +7,13 @@ import {
   Plus, Search, Ban, CheckCircle, XCircle, Trash2, Users, UserCheck, UserX, Eye, EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  getAccounts, createAccount, deleteAccount, toggleAccountStatus, logout,
-  type StaffAccount,
-} from '../../lib/auth';
+import { logout, StaffAccount, Role } from '../../lib/auth'; // Import StaffAccount and Role types
+import { api } from '../../lib/api';
 
 export function UserManagement() {
   const navigate = useNavigate();
-  const [accounts, setAccounts] = useState<StaffAccount[]>(getAccounts);
+  const [accounts, setAccounts] = useState<StaffAccount[]>([]); // Use StaffAccount type
+  const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -22,55 +21,66 @@ export function UserManagement() {
     { id: string; action: 'activate' | 'deactivate' | 'delete' } | null
   >(null);
   const [newUser, setNewUser] = useState({
-    name: '', email: '', password: '', role: '' as StaffAccount['role'] | '',
+    name: '', email: '', password: '', role: '' as Role | '', // Use Role enum
     branch: '', location: '',
   });
 
-  const refresh = () => setAccounts(getAccounts());
+  const fetchUsers = async () => {
+    setIsLoading(true);
+    try {
+      const data = await api.get('/users');
+      setAccounts(data);
+    } catch (error) {
+      toast.error('Failed to load users');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
 
   const handleLogout = () => {
     logout();
     navigate('/staff/login');
   };
 
-  const handleCreateUser = (e: React.FormEvent) => {
+  const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUser.name || !newUser.email || !newUser.password || !newUser.role) return;
 
-    const existing = getAccounts().find((a) => a.email === newUser.email);
-    if (existing) {
-      toast.error('An account with that email already exists.');
-      return;
+    try {
+      const created = await api.post('/users', {
+        ...newUser,
+        status: 'ACTIVE',
+      });
+      toast.success(`Account created for ${created.name}`);
+      setShowCreateModal(false);
+      setNewUser({ name: '', email: '', password: '', role: '', branch: '', location: '' });
+      fetchUsers();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create user');
     }
-
-    const created = createAccount({
-      name: newUser.name,
-      email: newUser.email,
-      password: newUser.password,
-      role: newUser.role as StaffAccount['role'],
-      branch: newUser.branch || undefined,
-      location: newUser.location || undefined,
-      status: 'active',
-    });
-    refresh();
-    toast.success(`Account created for ${created.name}`);
-    setShowCreateModal(false);
-    setNewUser({ name: '', email: '', password: '', role: '', branch: '', location: '' });
   };
 
-  const handleConfirmAction = () => {
+  const handleConfirmAction = async () => {
     if (!confirmAction) return;
     const { id, action } = confirmAction;
     const account = accounts.find((a) => a.id === id);
-    if (action === 'delete') {
-      deleteAccount(id);
-      refresh();
-      toast.success(`${account?.name}'s account has been deleted.`);
-    } else {
-      toggleAccountStatus(id);
-      refresh();
-      const newStatus = action === 'activate' ? 'activated' : 'deactivated';
-      toast.success(`${account?.name}'s account has been ${newStatus}.`);
+    
+    try {
+      if (action === 'delete') {
+        await api.delete(`/users/${id}`);
+        toast.success(`${account?.name}'s account has been deleted.`);
+      } else {
+        const newStatus = action === 'activate' ? 'ACTIVE' : 'SUSPENDED';
+        await api.patch(`/users/${id}/status`, { status: newStatus });
+        toast.success(`${account?.name}'s account has been ${action === 'activate' ? 'activated' : 'suspended'}.`);
+      }
+      fetchUsers();
+    } catch (error: any) {
+      toast.error(error.message || 'Action failed');
     }
     setConfirmAction(null);
   };
@@ -82,12 +92,12 @@ export function UserManagement() {
       (a.branch && a.branch.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const activeCount = accounts.filter((a) => a.status === 'active').length;
-  const suspendedCount = accounts.filter((a) => a.status === 'suspended').length;
+  const activeCount = accounts.filter((a) => a.status === 'ACTIVE').length;
+  const suspendedCount = accounts.filter((a) => a.status === 'SUSPENDED').length;
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="admin" onLogout={handleLogout} />
+      <Sidebar role="ADMIN" onLogout={handleLogout} /> {/* Sidebar role prop updated to uppercase */}
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
@@ -199,19 +209,19 @@ export function UserManagement() {
                           <div className="flex items-center gap-2">
                             <button
                               className={`p-2 rounded-lg transition-colors ${
-                                account.status === 'active'
+                                account.status === 'ACTIVE'
                                   ? 'text-gray-400 hover:text-red-500 hover:bg-gray-700'
                                   : 'text-gray-400 hover:text-green-500 hover:bg-gray-700'
                               }`}
                               onClick={() =>
                                 setConfirmAction({
                                   id: account.id,
-                                  action: account.status === 'active' ? 'deactivate' : 'activate',
+                                  action: account.status === 'ACTIVE' ? 'deactivate' : 'activate',
                                 })
                               }
-                              title={account.status === 'active' ? 'Suspend account' : 'Activate account'}
+                              title={account.status === 'ACTIVE' ? 'Suspend account' : 'Activate account'}
                             >
-                              {account.status === 'active' ? (
+                              {account.status === 'ACTIVE' ? (
                                 <Ban className="w-4 h-4" />
                               ) : (
                                 <CheckCircle className="w-4 h-4" />
@@ -299,7 +309,7 @@ export function UserManagement() {
                 <select
                   required
                   value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value as StaffAccount['role'] })}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value as Role })} // Use Role enum
                   className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary"
                 >
                   <option value="">Select role</option>

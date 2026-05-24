@@ -25,7 +25,6 @@ const reportSelect = {
   cardPayments: true, bankTransfers: true, cashPayments: true,
   branch: { select: { id: true, name: true, location: true } },
   manager: { select: { id: true, name: true } },
-  createdAt: true,
 };
 
 @Injectable()
@@ -36,7 +35,7 @@ export class SalesReportsService {
     return this.prisma.salesReport.findMany({
       where: {
         branchId: filters?.branchId,
-        ...(filters?.date ? { date: new Date(filters.date) } : {}),
+        ...(filters?.date ? { date: filters.date } : {}),
       },
       select: reportSelect,
       orderBy: { date: 'desc' },
@@ -53,15 +52,20 @@ export class SalesReportsService {
     const currentPrice = await this.prisma.fuelPrice.findFirst({ orderBy: { effectiveFrom: 'desc' } });
     if (!currentPrice) throw new BadRequestException('No fuel price set by admin');
 
-    const pmsPrice = currentPrice.pmsPrice;
-    const agoPrice = currentPrice.agoPrice;
+    const branch = await this.prisma.branch.findUnique({ where: { id: dto.branchId } });
+    if (!branch) throw new NotFoundException('Branch not found');
+
+    const pmsPrice = currentPrice.pms;
+    const agoPrice = currentPrice.ago;
     const totalSales = dto.soldPMS * pmsPrice + dto.soldAGO * agoPrice;
+    const totalPayments = dto.cardPayments + dto.bankTransfers + dto.cashPayments;
 
     return this.prisma.salesReport.create({
       data: {
         branchId: dto.branchId,
         managerId,
-        date: new Date(dto.date),
+        location: branch.location || 'N/A',
+        date: dto.date,
         openingPMS: dto.openingPMS,
         openingAGO: dto.openingAGO,
         soldPMS: dto.soldPMS,
@@ -75,6 +79,7 @@ export class SalesReportsService {
         cardPayments: dto.cardPayments,
         bankTransfers: dto.bankTransfers,
         cashPayments: dto.cashPayments,
+        totalPayments,
       },
       select: reportSelect,
     });
@@ -84,7 +89,7 @@ export class SalesReportsService {
     const report = await this.prisma.salesReport.findUnique({ where: { id } });
     if (!report) throw new NotFoundException('Report not found');
     if (report.managerId !== managerId) throw new ForbiddenException();
-    if (report.status !== 'DRAFT') throw new BadRequestException('Report already submitted');
+    if (report.status !== 'PENDING') throw new BadRequestException('Report already submitted');
 
     return this.prisma.salesReport.update({
       where: { id },

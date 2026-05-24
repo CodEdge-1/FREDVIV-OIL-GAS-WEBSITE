@@ -1,68 +1,72 @@
-import { Injectable, NotFoundException, BadRequestException, UnauthorizedException } from '@nestjs/common';
-import * as bcrypt from 'bcryptjs';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-
-const requestSelect = {
-  id: true, status: true, approvedAt: true, expiresAt: true, createdAt: true,
-  requestedBy: { select: { id: true, name: true, role: true } },
-  approvedBy: { select: { id: true, name: true } },
-};
+import { RequestStatus, Role } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class BalanceRequestsService {
   constructor(private prisma: PrismaService) {}
 
-  findAll() {
+  async findAll() {
     return this.prisma.balanceRequest.findMany({
-      select: requestSelect,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { requestTime: 'desc' },
+      include: { requester: true }
     });
   }
 
-  findPending() {
+  async findPending() {
     return this.prisma.balanceRequest.findMany({
-      where: { status: 'PENDING' },
-      select: requestSelect,
-      orderBy: { createdAt: 'desc' },
+      where: { status: RequestStatus.PENDING },
+      orderBy: { requestTime: 'asc' },
+      include: { requester: true }
     });
   }
 
-  async create(userId: string, pin: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.pinHash) throw new BadRequestException('PIN not set for this account');
-
-    const pinMatch = await bcrypt.compare(pin, user.pinHash);
-    if (!pinMatch) throw new UnauthorizedException('Invalid PIN');
-
+  async create(requesterId: string, role: Role) {
     return this.prisma.balanceRequest.create({
-      data: { requestedById: userId },
-      select: requestSelect,
+      data: { 
+        requesterId, 
+        role, 
+        status: RequestStatus.PENDING 
+      },
     });
   }
 
-  async approve(id: string, adminId: string) {
-    const req = await this.prisma.balanceRequest.findUnique({ where: { id } });
-    if (!req) throw new NotFoundException('Request not found');
-    if (req.status !== 'PENDING') throw new BadRequestException('Request already processed');
-
-    const expiresAt = new Date(Date.now() + 30 * 1000); // 30 seconds
+  async approve(id: string, rawPin: string) {
+    // Hook: Hash the PIN before saving to DB
+    const hashedPin = await bcrypt.hash(rawPin, 10);
 
     return this.prisma.balanceRequest.update({
       where: { id },
       data: {
-        status: 'APPROVED',
-        approvedById: adminId,
-        approvedAt: new Date(),
-        expiresAt,
+        status: RequestStatus.APPROVED,
+        adminPin: hashedPin,
+        approvedTime: new Date(),
       },
-      select: requestSelect,
     });
   }
 
-  async expire(id: string) {
-    return this.prisma.balanceRequest.update({
+  async validatePin(id: string, requesterId: string, rawPin: string) {
+    const request = await this.prisma.balanceRequest.findUnique({
       where: { id },
-      data: { status: 'EXPIRED' },
     });
+
+    if (!request || request.requesterId !== requesterId || request.pinUsed) {
+      throw new UnauthorizedException('Invalid or already used request');
+    }
+
+    // Hook: Compare hashed PIN
+    const isValid = await bcrypt.compare(rawPin, request.adminPin);
+    if (!isValid) {
+      throw new UnauthorizedException('Incorrect PIN');
+    }
+
+    // Mark as used immediately to prevent replay attacks
+    await this.prisma.balanceRequest.update({
+      where: { id },
+      data: { pinUsed: true }
+    });
+
+    return true;
   }
 }

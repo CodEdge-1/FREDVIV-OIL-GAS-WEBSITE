@@ -1,25 +1,49 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
-import { logout, getSession, getAccounts } from '../../lib/auth';
+import { logout, getSession, StaffAccount } from '../../lib/auth'; // Keep StaffAccount type for now
 import { ChatPanel } from '../../components/dashboard/ChatPanel';
-import { getPrices, getTodaySalesReport, getExpenses } from '../../lib/store';
-import { Fuel, Droplet, MessageSquare, TrendingUp, Receipt, CheckCircle } from 'lucide-react';
+import { api } from '../../lib/api';
+import { StatCard } from '../../components/dashboard/StatCard';
+import { toast } from 'sonner';
+import { Fuel, Droplet, MessageSquare, TrendingUp, Receipt, CheckCircle, Building2, Calendar } from 'lucide-react';
 
 export function ManagerDashboard() {
   const navigate = useNavigate();
   const [isChatOpen, setIsChatOpen] = useState(false);
 
   const session = getSession();
-  const account = session ? getAccounts().find((a) => a.id === session.id) : null;
-  const branchName = account?.branch || 'My Branch';
-  const branchLocation = account?.location || '';
+  const [account, setAccount] = useState<StaffAccount | null>(null);
+  const [prices, setPrices] = useState({ pms: 0, ago: 0 });
+  const [todaySales, setTodaySales] = useState<any | null>(null); // Replace 'any' with actual SalesReport type
+  const [pendingExpensesCount, setPendingExpensesCount] = useState(0);
 
-  const prices = getPrices();
-  const todaySales = session ? getTodaySalesReport(session.id) : null;
-  const pendingExpenses = session
-    ? getExpenses().filter((e) => e.managerId === session.id && e.status === 'pending').length
-    : 0;
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!session?.id) return;
+      try {
+        const [userData, priceData, salesData, expensesData] = await Promise.all([
+          api.get(`/users/${session.id}`),
+          api.get('/prices'), // Assuming an endpoint for global prices
+          api.get(`/sales-reports/today/${session.id}`), // Assuming an endpoint for today's sales report for a manager
+          api.get(`/expenses/manager/${session.id}`), // Assuming an endpoint for manager's expenses
+        ]);
+        setAccount(userData);
+        setPrices(priceData);
+        setTodaySales(salesData);
+        setPendingExpensesCount(expensesData.filter((e: any) => e.status === 'PENDING').length);
+      } catch (error) {
+        console.error('Failed to fetch dashboard data:', error);
+        toast.error('Failed to load dashboard data.');
+      }
+    };
+    fetchData();
+  }, [session?.id]);
+
+  const branchName = account?.branch || 'N/A';
+  const branchLocation = account?.location || 'N/A';
+
+  const pendingExpenses = pendingExpensesCount;
 
   const quickLinks = [
     { label: 'Enter Daily Sales', desc: "Record today's PMS and AGO sales", icon: TrendingUp, path: '/staff/manager/sales', color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20' },
@@ -29,7 +53,7 @@ export function ManagerDashboard() {
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="manager" onLogout={() => { logout(); navigate('/staff/login'); }} />
+      <Sidebar role="MANAGER" onLogout={() => { logout(); navigate('/staff/login'); }} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
@@ -52,41 +76,34 @@ export function ManagerDashboard() {
         <main className="p-6 space-y-6">
           {/* Price & Branch Summary */}
           <div className="grid md:grid-cols-4 gap-4">
-            <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-              <div className="flex items-center gap-3 mb-2">
-                <Fuel className="w-5 h-5 text-blue-500" />
-                <p className="text-gray-400 text-sm">PMS Price</p>
-              </div>
-              <p className="text-2xl font-bold text-white">
-                {prices.pms > 0 ? `₦${prices.pms}/L` : <span className="text-gray-500 text-lg">Not set</span>}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">Set by Admin</p>
-            </div>
-
-            <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-              <div className="flex items-center gap-3 mb-2">
-                <Droplet className="w-5 h-5 text-green-500" />
-                <p className="text-gray-400 text-sm">AGO Price</p>
-              </div>
-              <p className="text-2xl font-bold text-white">
-                {prices.ago > 0 ? `₦${prices.ago}/L` : <span className="text-gray-500 text-lg">Not set</span>}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">Set by Admin</p>
-            </div>
-
-            <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-              <p className="text-gray-400 text-sm mb-2">Branch</p>
-              <p className="text-xl font-bold text-white">{branchName}</p>
-              {branchLocation && <p className="text-xs text-gray-500 mt-1">{branchLocation}</p>}
-            </div>
-
-            <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-              <p className="text-gray-400 text-sm mb-2">Date</p>
-              <p className="text-xl font-bold text-white">
-                {new Date().toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">Today</p>
-            </div>
+            <StatCard
+              variant="manager"
+              icon={Fuel}
+              color="text-blue-500"
+              label="PMS Price"
+              value={prices.pms > 0 ? `₦${prices.pms}/L` : <span className="text-gray-500 text-lg">Not set</span>}
+              subtext="Set by Admin"
+            />
+            <StatCard
+              variant="manager"
+              icon={Droplet}
+              color="text-green-500"
+              label="AGO Price"
+              value={prices.ago > 0 ? `₦${prices.ago}/L` : <span className="text-gray-500 text-lg">Not set</span>}
+              subtext="Set by Admin"
+            />
+            <StatCard
+              variant="manager"
+              label="Branch"
+              value={branchName}
+              subtext={branchLocation || undefined}
+            />
+            <StatCard
+              variant="manager"
+              label="Date"
+              value={new Date().toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
+              subtext="Today"
+            />
           </div>
 
           {/* Quick Actions */}

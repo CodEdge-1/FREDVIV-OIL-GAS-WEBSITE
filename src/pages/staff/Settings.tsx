@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { logout } from '../../lib/auth';
@@ -16,308 +16,63 @@ import {
   CheckCheck,
   BellOff,
 } from 'lucide-react';
+import { 
+  SectionCard, 
+  Field, 
+  TextInput, 
+  Toggle, 
+  SaveButton 
+} from '../../components/dashboard/SettingsComponents';
+import { ProfileSection } from './ProfileSection'; // Corrected import path
 import {
-  getNotifications,
-  markNotificationRead,
-  markAllNotificationsRead,
-  getActivityLog,
-  addActivityLog,
   type AppNotification,
   type ActivityLogEntry,
 } from '../../lib/store';
+import { api } from '../../lib/api';
+import { getSession } from '../../lib/auth'; // Import getSession from lib/auth
 
 type Tab = 'profile' | 'notifications' | 'system' | 'security';
 
-// ── Reusable sub-components ──────────────────────────────────────────────────
-
-function SectionCard({ title, description, children }: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-      <div className="mb-6">
-        <h3 className="text-white font-bold text-lg">{title}</h3>
-        <p className="text-gray-400 text-sm mt-1">{description}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Field({ label, hint, children }: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-gray-300 mb-1.5">{label}</label>
-      {children}
-      {hint && <p className="text-xs text-gray-500 mt-1.5">{hint}</p>}
-    </div>
-  );
-}
-
-function TextInput({
-  value,
-  onChange,
-  type = 'text',
-  placeholder,
-  disabled,
-  autoComplete,
-}: {
-  value: string;
-  onChange?: (v: string) => void;
-  type?: string;
-  placeholder?: string;
-  disabled?: boolean;
-  autoComplete?: string;
-}) {
-  return (
-    <input
-      type={type}
-      value={value}
-      onChange={(e) => onChange?.(e.target.value)}
-      placeholder={placeholder}
-      disabled={disabled}
-      autoComplete={autoComplete}
-      className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
-    />
-  );
-}
-
-function Toggle({ checked, onChange, label, description }: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  description: string;
-}) {
-  return (
-    <div className="flex items-start justify-between py-4 border-b border-gray-700 last:border-0">
-      <div className="pr-4">
-        <p className="text-white text-sm font-medium">{label}</p>
-        <p className="text-gray-400 text-xs mt-0.5">{description}</p>
-      </div>
-      <button
-        type="button"
-        onClick={() => onChange(!checked)}
-        className={`relative flex-shrink-0 w-11 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-gray-800 ${
-          checked ? 'bg-primary' : 'bg-gray-600'
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-            checked ? 'translate-x-5' : 'translate-x-0'
-          }`}
-        />
-      </button>
-    </div>
-  );
-}
-
-function SaveButton({ onClick, saved }: { onClick: () => void; saved: boolean }) {
-  return (
-    <div className="flex justify-end pt-2">
-      <button
-        type="button"
-        onClick={onClick}
-        className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
-      >
-        {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-        {saved ? 'Saved' : 'Save Changes'}
-      </button>
-    </div>
-  );
-}
-
 // ── Tab Sections ─────────────────────────────────────────────────────────────
 
-const ADMIN_PROFILE_KEY = 'adminProfile';
-const ADMIN_PASSWORD_KEY = 'fredviv_admin_pwd';
-
-function getAdminPassword(): string {
-  return localStorage.getItem(ADMIN_PASSWORD_KEY) || 'Admin@2024';
-}
-
-function ProfileSection() {
-  const stored = (() => { try { return JSON.parse(localStorage.getItem(ADMIN_PROFILE_KEY) || '{}'); } catch { return {}; } })();
-
-  const [phone, setPhone] = useState(stored.phone ?? '');
-  const [currentPwd, setCurrentPwd] = useState('');
-  const [newPwd, setNewPwd] = useState('');
-  const [confirmPwd, setConfirmPwd] = useState('');
-  const [showCurrent, setShowCurrent] = useState(false);
-  const [showNew, setShowNew] = useState(false);
-  const [currentPwdVerified, setCurrentPwdVerified] = useState(false);
-  const [profileSaved, setProfileSaved] = useState(false);
-  const [pwdSaved, setPwdSaved] = useState(false);
-
-  const handleSaveProfile = () => {
-    localStorage.setItem(ADMIN_PROFILE_KEY, JSON.stringify({ phone }));
-    setProfileSaved(true);
-    toast.success('Profile updated successfully');
-    setTimeout(() => setProfileSaved(false), 2000);
-  };
-
-  const handleVerifyCurrentPwd = () => {
-    if (!currentPwd) {
-      toast.error('Please enter your current password');
-      return;
-    }
-    if (currentPwd !== getAdminPassword()) {
-      toast.error('Current password is incorrect');
-      return;
-    }
-    setCurrentPwdVerified(true);
-    toast.success('Password verified — enter your new password below');
-  };
-
-  const handleSavePassword = () => {
-    if (!newPwd || !confirmPwd) {
-      toast.error('Please fill in all password fields');
-      return;
-    }
-    if (newPwd !== confirmPwd) {
-      toast.error('New passwords do not match');
-      return;
-    }
-    if (newPwd.length < 8) {
-      toast.error('New password must be at least 8 characters');
-      return;
-    }
-    localStorage.setItem(ADMIN_PASSWORD_KEY, newPwd);
-    addActivityLog({ action: 'Admin password changed', type: 'security' });
-    setPwdSaved(true);
-    toast.success('Password changed successfully');
-    setCurrentPwd('');
-    setNewPwd('');
-    setConfirmPwd('');
-    setCurrentPwdVerified(false);
-    setTimeout(() => setPwdSaved(false), 2000);
-  };
-
-  return (
-    <div className="space-y-6">
-      <SectionCard
-        title="Personal Information"
-        description="Update your account name, email address, and contact details."
-      >
-        <div className="grid sm:grid-cols-2 gap-4 mb-6">
-          <Field label="Full Name">
-            <TextInput value="Administrator" disabled autoComplete="off" />
-          </Field>
-          <Field label="Email Address" hint="Admin email cannot be changed here.">
-            <TextInput value="admin@fredvivoil.com" type="email" disabled autoComplete="off" />
-          </Field>
-          <Field label="Phone Number">
-            <TextInput value={phone} onChange={setPhone} type="tel" placeholder="Enter phone number" autoComplete="off" />
-          </Field>
-          <Field label="Role">
-            <TextInput value="Super Administrator" disabled />
-          </Field>
-        </div>
-        <SaveButton onClick={handleSaveProfile} saved={profileSaved} />
-      </SectionCard>
-
-      <SectionCard
-        title="Change Password"
-        description="Choose a strong password that is at least 8 characters long."
-      >
-        <div className="space-y-4 mb-6">
-          {/* Step 1: Verify current password */}
-          <Field label="Current Password">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <TextInput
-                  value={currentPwd}
-                  onChange={(v) => { setCurrentPwd(v); setCurrentPwdVerified(false); }}
-                  type={showCurrent ? 'text' : 'password'}
-                  placeholder="Enter current password"
-                  autoComplete="off"
-                  disabled={currentPwdVerified}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowCurrent(!showCurrent)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                >
-                  {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {currentPwdVerified ? (
-                <div className="flex items-center gap-1.5 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm flex-shrink-0">
-                  <ShieldCheck className="w-4 h-4" />
-                  Verified
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleVerifyCurrentPwd}
-                  className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded-lg transition-colors flex-shrink-0"
-                >
-                  Verify
-                </button>
-              )}
-            </div>
-          </Field>
-
-          {/* Step 2: New password fields — only shown after verification */}
-          {currentPwdVerified && (
-            <div className="grid sm:grid-cols-2 gap-4 pt-2 border-t border-gray-700">
-              <Field label="New Password">
-                <div className="relative">
-                  <TextInput
-                    value={newPwd}
-                    onChange={setNewPwd}
-                    type={showNew ? 'text' : 'password'}
-                    placeholder="Min. 8 characters"
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowNew(!showNew)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                  >
-                    {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </Field>
-              <Field label="Confirm New Password">
-                <TextInput
-                  value={confirmPwd}
-                  onChange={setConfirmPwd}
-                  type="password"
-                  placeholder="Re-enter new password"
-                  autoComplete="new-password"
-                />
-              </Field>
-            </div>
-          )}
-        </div>
-        {currentPwdVerified && <SaveButton onClick={handleSavePassword} saved={pwdSaved} />}
-      </SectionCard>
-    </div>
-  );
-}
-
 function NotificationsSection() {
-  const ADMIN_ID = 'admin';
-  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
-    getNotifications(ADMIN_ID)
-  );
+  const session = getSession(); // Assuming getSession still works for current user ID
+  const recipientId = session?.id || 'admin'; // Fallback to 'admin' if session ID is not available
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  const fetchNotifications = async () => {
+    if (!recipientId) return;
+    try {
+      const data = await api.get(`/users/${recipientId}/notifications`);
+      setNotifications(data);
+    } catch (error) {
+      console.error('Failed to fetch notifications:', error);
+      toast.error('Failed to load notifications.');
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [recipientId]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  const handleMarkRead = (id: string) => {
-    markNotificationRead(id);
-    setNotifications(getNotifications(ADMIN_ID));
+  const handleMarkRead = async (id: string) => {
+    try {
+      await api.patch(`/users/${recipientId}/notifications/${id}`, { read: true });
+      fetchNotifications(); // Re-fetch to update UI
+    } catch (error) {
+      toast.error('Failed to mark notification as read.');
+    }
   };
 
-  const handleMarkAllRead = () => {
-    markAllNotificationsRead(ADMIN_ID);
-    setNotifications(getNotifications(ADMIN_ID));
+  const handleMarkAllRead = async () => {
+    try {
+      await api.patch(`/users/${recipientId}/notifications/mark-all-read`, {});
+      fetchNotifications(); // Re-fetch to update UI
+    } catch (error) {
+      toast.error('Failed to mark all notifications as read.');
+    }
   };
 
   const formatTime = (iso: string) => {
@@ -499,7 +254,19 @@ function SecuritySection() {
   const [logActivity, setLogActivity] = useState(true);
   const [twoFactor, setTwoFactor] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>(getActivityLog);
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+
+  useEffect(() => {
+    const fetchLogs = async () => {
+      try {
+        const logs = await api.get('/system/activity-logs');
+        setActivityLog(logs);
+      } catch (error) {
+        console.error('Failed to fetch activity logs');
+      }
+    };
+    fetchLogs();
+  }, []);
 
   const typeColors: Record<string, string> = {
     security: 'text-red-400',
@@ -606,8 +373,8 @@ export function Settings() {
   const handleLogout = () => { logout(); navigate('/staff/login'); };
 
   return (
-    <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="admin" onLogout={handleLogout} />
+    <div className="flex min-h-screen bg-gray-900"> {/* Sidebar role prop updated to uppercase */}
+      <Sidebar role="ADMIN" onLogout={handleLogout} />
 
       <div className="flex-1 overflow-x-hidden">
         {/* Header */}
@@ -647,7 +414,7 @@ export function Settings() {
 
             {/* Tab Content */}
             <div className="flex-1 min-w-0">
-              {activeTab === 'profile' && <ProfileSection />}
+              {activeTab === 'profile' && <ProfileSection roleLabel="Super Administrator" isAdmin={true} />}
               {activeTab === 'notifications' && <NotificationsSection />}
               {activeTab === 'system' && <SystemSection />}
               {activeTab === 'security' && <SecuritySection />}

@@ -1,54 +1,68 @@
-import { useState } from 'react';
-import { AlertCircle, CheckCircle, Clock, X, Key, User } from 'lucide-react';
-import {
-  getPendingBankAccessRequests,
-  updateBankAccessRequest,
-  AVAILABLE_BANKS,
-  type BankAccessRequest,
-} from '../lib/store';
+import { useState, useEffect } from 'react';
+import { AlertCircle, CheckCircle, Clock, X, Key, User, RefreshCw } from 'lucide-react';
+import { AVAILABLE_BANKS, type BankAccessRequest } from '../lib/store';
+import { api } from '../lib/api';
+import { toast } from 'sonner';
 
 export function AdminBankAccessManagement() {
-  const [requests, setRequests] = useState<BankAccessRequest[]>(getPendingBankAccessRequests());
+  const [requests, setRequests] = useState<BankAccessRequest[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<Record<string, { username: string; password: string }>>({});
+  const [isLoading, setIsLoading] = useState(true);
 
-  const refreshRequests = () => {
-    setRequests(getPendingBankAccessRequests());
+  const refreshRequests = async () => {
+    setIsLoading(true);
+    try {
+      const data = await api.get('/bank-access-requests/pending');
+      setRequests(data);
+    } catch (error) {
+      toast.error('Failed to load pending bank requests');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleApproveRequest = (request: BankAccessRequest) => {
+  useEffect(() => {
+    refreshRequests();
+  }, []);
+
+  const handleApproveRequest = async (request: BankAccessRequest) => {
     const creds = credentials[request.id];
     if (!creds?.username || !creds?.password) {
-      alert('Please provide both username and password');
+      toast.error('Please provide both username and password');
       return;
     }
 
-    const expiryTime = new Date();
-    expiryTime.setHours(expiryTime.getHours() + 24); // 24-hour access
+    try {
+      await api.patch(`/bank-access-requests/${request.id}/approve`, {
+        username: creds.username,
+        password: creds.password
+      });
 
-    const updates: Partial<BankAccessRequest> = {
-      status: 'approved',
-      loginUsername: creds.username,
-      loginPassword: creds.password,
-      approvedTime: new Date().toLocaleString('en-NG'),
-      expiresAt: expiryTime.toISOString(),
-    };
-
-    updateBankAccessRequest(request.id, updates);
-    setCredentials((prev) => {
-      const next = { ...prev };
-      delete next[request.id];
-      return next;
-    });
-    setExpandedId(null);
-    refreshRequests();
-    alert(`Access approved for ${request.requester} - ${request.bankName}`);
+      setCredentials((prev) => {
+        const next = { ...prev };
+        delete next[request.id];
+        return next;
+      });
+      setExpandedId(null);
+      refreshRequests();
+      toast.success(`Access approved for ${request.requester}`);
+    } catch (error) {
+      toast.error('Failed to approve request');
+    }
   };
 
-  const handleRejectRequest = (request: BankAccessRequest) => {
-    if (confirm(`Reject access request from ${request.requester} for ${request.bankName}?`)) {
-      updateBankAccessRequest(request.id, { status: 'rejected' });
-      refreshRequests();
+  const handleRejectRequest = async (request: BankAccessRequest) => {
+    if (window.confirm(`Reject access request from ${request.requester} for ${request.bankName}?`)) {
+      try {
+        await api.patch(`/bank-access-requests/${request.id}/reject`, {
+          status: 'REJECTED'
+        });
+        refreshRequests();
+        toast.success(`Request rejected for ${request.requester}`);
+      } catch (error) {
+        toast.error('Failed to reject request');
+      }
     }
   };
 

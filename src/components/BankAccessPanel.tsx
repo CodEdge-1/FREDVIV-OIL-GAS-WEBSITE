@@ -1,49 +1,62 @@
 import { Lock, Building2, AlertCircle, CheckCircle, Clock, ExternalLink } from 'lucide-react';
 import { 
-  getBankAccessRequests, 
-  saveBankAccessRequest, 
-  getApprovedBankAccessRequest,
-  AVAILABLE_BANKS,
-  type BankAccessRequest 
-} from '../lib/store';
-import { getSession } from '../lib/auth';
+  AVAILABLE_BANKS, // Keep for now, but should come from backend (or be a shared type)
+  type BankAccessRequest, // Keep type for now, will replace with backend type
+} from '../lib/store'; // Remove local storage functions
+import { getSession, Role } from '../lib/auth'; // Import Role type
+import { api } from '../lib/api';
+import { toast } from 'sonner';
+import { useState, useEffect } from 'react';
 
 interface BankAccessPanelProps {
-  role: 'accountant' | 'auditor';
-  onBankSelect?: (bankId: 'uba' | 'zenith') => void;
+  role: Role; // Use the Role enum
+  onBankSelect?: (bankId: 'uba' | 'zenith') => void; // Keep bankId as string literals
 }
 
 export function BankAccessPanel({ role, onBankSelect }: BankAccessPanelProps) {
   const session = getSession();
   const userId = session?.id ?? '';
-  const userName = session?.name ?? 'User';
+  const userName = session?.name ?? 'N/A';
 
-  const allRequests = getBankAccessRequests();
-  const userRequests = allRequests.filter((r) => r.requesterId === userId);
+  const [userRequests, setUserRequests] = useState<BankAccessRequest[]>([]);
 
-  const handleRequestAccess = (bankId: 'uba' | 'zenith') => {
+  const fetchUserRequests = async () => {
+    if (!userId) return;
+    try {
+      const data = await api.get(`/bank-access-requests/user/${userId}`); // Assuming an endpoint for user's bank access requests
+      setUserRequests(data);
+    } catch (error) {
+      console.error('Failed to fetch bank access requests:', error);
+      toast.error('Failed to load bank access requests.');
+    }
+  };
+
+  useEffect(() => {
+    fetchUserRequests();
+  }, [userId]);
+
+  const handleRequestAccess = async (bankId: 'uba' | 'zenith') => {
     const bankName = AVAILABLE_BANKS.find((b) => b.id === bankId)?.name || '';
     
     // Check if already has pending or approved request
     const existing = userRequests.find((r) => r.bankId === bankId);
-    if (existing?.status === 'pending') {
-      alert('You already have a pending request for this bank.');
+    if (existing?.status === 'PENDING') {
+      toast.info('You already have a pending request for this bank.');
       return;
     }
     
-    const newRequest: BankAccessRequest = {
-      id: `BAR-${Date.now()}`,
-      requesterId: userId,
-      requester: userName,
-      role: role,
-      bankId: bankId,
-      bankName: bankName,
-      requestTime: new Date().toLocaleString('en-NG'),
-      status: 'pending',
-    };
-
-    saveBankAccessRequest(newRequest);
-    alert('Request sent to Admin. You will be notified once approved.');
+    try {
+      await api.post('/bank-access-requests', {
+        requesterId: userId,
+        bankId: bankId,
+        status: 'PENDING', // Ensure status matches Prisma enum
+      });
+      toast.success('Request sent to Admin. You will be notified once approved.');
+      fetchUserRequests(); // Re-fetch requests to update UI
+    } catch (error) {
+      console.error('Failed to submit bank access request:', error);
+      toast.error('Failed to submit bank access request.');
+    }
   };
 
   return (
@@ -62,8 +75,8 @@ export function BankAccessPanel({ role, onBankSelect }: BankAccessPanelProps) {
         {/* Available Banks */}
         <div className="space-y-3 mb-6">
           {AVAILABLE_BANKS.map((bank) => {
-            const request = userRequests.find((r) => r.bankId === bank.id);
-            const approved = getApprovedBankAccessRequest(userId, bank.id);
+            const request = userRequests.find((r) => r.bankId === bank.id && r.status === 'APPROVED' && (!r.expiresAt || new Date(r.expiresAt) > new Date())); // Find an active approved request
+            const approved = !!request; // Check if an approved request exists
             
             return (
               <div
@@ -77,14 +90,14 @@ export function BankAccessPanel({ role, onBankSelect }: BankAccessPanelProps) {
                   <div>
                     <h3 className="font-semibold text-white">{bank.name}</h3>
                     {request && (
-                      <div className="flex items-center gap-2 mt-1 text-xs">
-                        {request.status === 'pending' && (
+                      <div className="flex items-center gap-2 mt-1 text-xs"> {/* Check request.status */}
+                        {request.status === 'PENDING' && ( // Use uppercase PENDING
                           <>
                             <Clock className="w-3 h-3 text-yellow-400" />
                             <span className="text-yellow-400">Pending approval</span>
                           </>
                         )}
-                        {request.status === 'rejected' && (
+                        {request.status === 'REJECTED' && ( // Use uppercase REJECTED
                           <>
                             <AlertCircle className="w-3 h-3 text-red-400" />
                             <span className="text-red-400">Request rejected</span>

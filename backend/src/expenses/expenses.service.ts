@@ -16,9 +16,9 @@ export class ReviewExpenseDto {
 
 const expenseSelect = {
   id: true, type: true, description: true, amount: true, date: true,
-  status: true, rejectReason: true, approvedAt: true,
+  status: true,
   branch: { select: { id: true, name: true, location: true } },
-  submittedBy: { select: { id: true, name: true } },
+  manager: { select: { id: true, name: true } },
   approvedBy: { select: { id: true, name: true } },
   createdAt: true,
 };
@@ -45,11 +45,11 @@ export class ExpensesService {
     return this.prisma.expense.create({
       data: {
         branchId: dto.branchId,
-        submittedById: userId,
+        managerId: userId,
         type: dto.type,
         description: dto.description,
         amount: dto.amount,
-        date: new Date(dto.date),
+        date: dto.date,
       },
       select: expenseSelect,
     });
@@ -65,8 +65,6 @@ export class ExpensesService {
       data: {
         status: dto.action === 'approve' ? 'APPROVED' : 'REJECTED',
         approvedById: adminId,
-        approvedAt: new Date(),
-        rejectReason: dto.rejectReason,
       },
       select: expenseSelect,
     });

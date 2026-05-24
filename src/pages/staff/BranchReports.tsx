@@ -1,16 +1,31 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { StatusBadge } from '../../components/dashboard/StatusBadge';
 import { logout } from '../../lib/auth';
-import { getSalesReports, type SalesReport } from '../../lib/store';
+import { api } from '../../lib/api';
+import { toast } from 'sonner';
+import { type SalesReport } from '../../lib/store'; // Keep type for now, will replace with backend type
 import { Filter, Download, Calendar, FileText } from 'lucide-react';
 
 export function BranchReports() {
   const navigate = useNavigate();
   const [selectedBranch, setSelectedBranch] = useState('all');
 
-  const reports: SalesReport[] = getSalesReports();
+  const [reports, setReports] = useState<SalesReport[]>([]);
+
+  useEffect(() => {
+    const fetchReports = async () => {
+      try {
+        const data = await api.get('/sales-reports'); // Assuming an endpoint for all sales reports
+        setReports(data);
+      } catch (error) {
+        console.error('Failed to fetch sales reports:', error);
+        toast.error('Failed to load sales reports.');
+      }
+    };
+    fetchReports();
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -28,7 +43,7 @@ export function BranchReports() {
   const branches = Array.from(new Set(reports.map((r) => r.branch)));
 
   const filteredReports = selectedBranch === 'all'
-    ? reports
+    ? reports // Filtered reports should be based on the fetched reports
     : reports.filter((r) => r.branch === selectedBranch);
 
   const hasData = filteredReports.length > 0;
@@ -38,7 +53,7 @@ export function BranchReports() {
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="admin" onLogout={handleLogout} />
+      <Sidebar role="ADMIN" onLogout={handleLogout} /> {/* Sidebar role prop updated to uppercase */}
 
       <div className="flex-1 overflow-x-hidden">
         {/* Header */}

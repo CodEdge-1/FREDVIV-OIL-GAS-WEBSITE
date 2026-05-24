@@ -1,53 +1,92 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { StatusBadge } from '../../components/dashboard/StatusBadge';
-import { logout } from '../../lib/auth';
-import { getExpenses, updateExpenseStatus, addNotification, addActivityLog, type Expense } from '../../lib/store';
+import { logout, getSession } from '../../lib/auth';
+import { type Expense } from '../../lib/store'; // Keep type for now, will replace with backend type
+import { api } from '../../lib/api';
+import { toast } from 'sonner';
 import { Check, X } from 'lucide-react';
 
 export function ExpenseApprovals() {
   const navigate = useNavigate();
-  const [expenses, setExpenses] = useState<Expense[]>(getExpenses);
+  const session = getSession();
+  const [expenses, setExpenses] = useState<Expense[]>([]); // Initialize with empty array
 
-  const handleApprove = (id: string) => {
-    const exp = expenses.find((e) => e.id === id);
-    updateExpenseStatus(id, 'approved');
-    if (exp) {
-      addNotification({
-        recipientId: exp.managerId,
-        title: 'Expense Approved',
-        body: `Your ${exp.type} expense of ${formatCurrency(exp.amount)} has been approved by admin.`,
-      });
-      addActivityLog({ action: `Expense approved — ${id} (${exp.managerName})`, type: 'expense' });
+  const fetchExpenses = async () => {
+    try {
+      const data = await api.get('/expenses'); // Assuming an endpoint for all expenses
+      setExpenses(data);
+    } catch (error) {
+      console.error('Failed to fetch expenses:', error);
+      toast.error('Failed to load expenses.');
     }
-    setExpenses(getExpenses());
   };
 
-  const handleReject = (id: string) => {
-    const exp = expenses.find((e) => e.id === id);
-    updateExpenseStatus(id, 'rejected');
-    if (exp) {
-      addNotification({
-        recipientId: exp.managerId,
-        title: 'Expense Rejected',
-        body: `Your ${exp.type} expense of ${formatCurrency(exp.amount)} has been rejected by admin.`,
+  useEffect(() => {
+    fetchExpenses();
+  }, []);
+
+  const handleApprove = async (id: string) => {
+    const expenseToUpdate = expenses.find((e) => e.id === id);
+    if (!expenseToUpdate) return;
+
+    try {
+      await api.patch(`/expenses/${id}/status`, { status: 'APPROVED' }); // Assuming an endpoint to update status
+      await api.post('/notifications', { // Send notification via API
+        userId: expenseToUpdate.managerId,
+        title: 'Expense Approved',
+        body: `Your ${expenseToUpdate.type} expense of ${formatCurrency(expenseToUpdate.amount)} has been approved by admin.`,
       });
-      addActivityLog({ action: `Expense rejected — ${id} (${exp.managerName})`, type: 'expense' });
+      await api.post('/activity-logs', { // Add activity log via API
+        userId: session?.id, // Admin's ID
+        action: `Expense approved — ${id} (${expenseToUpdate.managerName})`,
+        type: 'expense',
+        details: `Expense ID: ${id}`,
+      });
+      toast.success('Expense approved.');
+      fetchExpenses(); // Re-fetch to update UI
+    } catch (error) {
+      console.error('Failed to approve expense:', error);
+      toast.error('Failed to approve expense.');
     }
-    setExpenses(getExpenses());
+  };
+
+  const handleReject = async (id: string) => {
+    const expenseToUpdate = expenses.find((e) => e.id === id);
+    if (!expenseToUpdate) return;
+
+    try {
+      await api.patch(`/expenses/${id}/status`, { status: 'REJECTED' }); // Assuming an endpoint to update status
+      await api.post('/notifications', { // Send notification via API
+        userId: expenseToUpdate.managerId,
+        title: 'Expense Rejected',
+        body: `Your ${expenseToUpdate.type} expense of ${formatCurrency(expenseToUpdate.amount)} has been rejected by admin.`,
+      });
+      await api.post('/activity-logs', { // Add activity log via API
+        userId: session?.id, // Admin's ID
+        action: `Expense rejected — ${id} (${expenseToUpdate.managerName})`,
+        type: 'expense',
+        details: `Expense ID: ${id}`,
+      });
+      toast.success('Expense rejected.');
+      fetchExpenses(); // Re-fetch to update UI
+    } catch (error) {
+      console.error('Failed to reject expense:', error);
+      toast.error('Failed to reject expense.');
+    }
   };
 
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 0 }).format(amount);
 
-  const pendingExpenses = expenses.filter((e) => e.status === 'pending');
+  const pendingExpenses = expenses.filter((e) => e.status === 'PENDING'); // Status is now uppercase
   const totalPending = pendingExpenses.reduce((sum, e) => sum + e.amount, 0);
   const thisMonth = expenses.filter((e) => e.date.startsWith(new Date().toISOString().slice(0, 7)));
 
   return (
-    <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="admin" onLogout={() => { logout(); navigate('/staff/login'); }} />
+    <div className="flex min-h-screen bg-gray-900"> {/* Sidebar role prop updated to uppercase */}
+      <Sidebar role="ADMIN" onLogout={() => { logout(); navigate('/staff/login'); }} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
@@ -113,9 +152,9 @@ export function ExpenseApprovals() {
                         <td className="px-6 py-4 text-sm text-gray-300">{expense.description}</td>
                         <td className="px-6 py-4 text-white font-bold">{formatCurrency(expense.amount)}</td>
                         <td className="px-6 py-4 text-gray-400 text-sm">{expense.date}</td>
-                        <td className="px-6 py-4"><StatusBadge status={expense.status} /></td>
+                        <td className="px-6 py-4"><StatusBadge status={expense.status.toLowerCase() as any} /></td>
                         <td className="px-6 py-4">
-                          {expense.status === 'pending' ? (
+                          {expense.status === 'PENDING' ? (
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => handleApprove(expense.id)}

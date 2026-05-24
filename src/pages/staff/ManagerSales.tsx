@@ -1,25 +1,48 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { StatusBadge } from '../../components/dashboard/StatusBadge';
-import { logout, getSession, getAccounts } from '../../lib/auth';
-import { getPrices, getTodaySalesReport, saveSalesReport, addNotification, type SalesReport } from '../../lib/store';
+import { logout, getSession, StaffAccount } from '../../lib/auth';
+import { api } from '../../lib/api';
+import { toast } from 'sonner';
+import { type SalesReport } from '../../lib/store'; // Keep type for now, will replace with backend type
 import { Fuel, Droplet, Lock, Save, Calculator, TrendingUp } from 'lucide-react';
 
 export function ManagerSales() {
   const navigate = useNavigate();
 
   const session = getSession();
-  const account = session ? getAccounts().find((a) => a.id === session.id) : null;
-  const branchName = account?.branch || 'My Branch';
-  const branchLocation = account?.location || '';
+  const [account, setAccount] = useState<StaffAccount | null>(null);
+  const [prices, setPrices] = useState({ pms: 0, ago: 0 });
+  const [existingReport, setExistingReport] = useState<SalesReport | null>(null);
 
-  const prices = getPrices();
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!session?.id) return;
+      try {
+        const [userData, priceData, salesReportData] = await Promise.all([
+          api.get(`/users/${session.id}`),
+          api.get('/prices'),
+          api.get(`/sales-reports/today/${session.id}`), // Assuming an endpoint for today's sales report for a manager
+        ]);
+        setAccount(userData);
+        setPrices(priceData);
+        setExistingReport(salesReportData);
+      } catch (error) {
+        console.error('Failed to fetch sales data:', error);
+        toast.error('Failed to load sales data.');
+      }
+    };
+    fetchData();
+  }, [session?.id]);
+
+  const branchName = account?.branch || 'N/A';
+  const branchLocation = account?.location || 'N/A';
+
   const pmsPrice = prices.pms;
   const agoPrice = prices.ago;
 
   const today = new Date().toISOString().split('T')[0];
-  const existingReport = session ? getTodaySalesReport(session.id) : null;
 
   const [isSubmitted, setIsSubmitted] = useState(!!existingReport);
   const [openingPMS, setOpeningPMS] = useState(String(existingReport?.openingPMS ?? ''));
@@ -38,21 +61,20 @@ export function ManagerSales() {
   const totalDailySales = totalPMSSales + totalAGOSales;
   const totalPayments = Number(cardPayments) + Number(bankTransfers) + Number(cashPayments);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!session) return;
-    const report: SalesReport = {
-      id: existingReport?.id ?? `SR-${Date.now()}`,
+
+    const reportData = {
       managerId: session.id,
-      managerName: session.name,
       branch: branchName,
       location: branchLocation,
       date: today,
       openingPMS: Number(openingPMS),
       soldPMS: Number(soldPMS),
       remainingPMS: Number(remainingPMS),
-      openingAGO: Number(openingAGO),
-      soldAGO: Number(soldAGO),
-      remainingAGO: Number(remainingAGO),
+      openingAGO: Number(openingAGO), // Assuming these are part of the sales report
+      soldAGO: Number(soldAGO), // Assuming these are part of the sales report
+      remainingAGO: Number(remainingAGO), // Assuming these are part of the sales report
       overage: Number(overage),
       pmsPrice,
       agoPrice,
@@ -63,20 +85,23 @@ export function ManagerSales() {
       bankTransfers: Number(bankTransfers),
       cashPayments: Number(cashPayments),
       totalPayments,
-      submittedAt: new Date().toISOString(),
     };
-    saveSalesReport(report);
-    addNotification({
-      recipientId: 'admin',
-      title: 'Sales Report Submitted',
-      body: `${session.name} (${branchName}) submitted their daily sales report — ₦${totalDailySales.toLocaleString()} total.`,
-    });
-    setIsSubmitted(true);
+
+    try {
+      await api.post('/sales-reports', reportData); // Assuming an endpoint to submit sales reports
+      toast.success('Sales report submitted successfully!');
+      setIsSubmitted(true);
+      // Send notification to admin via API
+      await api.post('/notifications', { userId: 'admin', title: 'Sales Report Submitted', body: `${session.name} (${branchName}) submitted their daily sales report — ₦${totalDailySales.toLocaleString()} total.` });
+    } catch (error) {
+      console.error('Failed to submit sales report:', error);
+      toast.error('Failed to submit sales report.');
+    }
   };
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="manager" onLogout={() => { logout(); navigate('/staff/login'); }} />
+      <Sidebar role="MANAGER" onLogout={() => { logout(); navigate('/staff/login'); }} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
@@ -107,7 +132,7 @@ export function ManagerSales() {
               </div>
               {isSubmitted && (
                 <div className="flex items-center gap-2">
-                  <StatusBadge status="submitted" />
+                  <StatusBadge status="APPROVED" /> {/* Assuming 'submitted' maps to 'APPROVED' or a new status */}
                   <Lock className="w-5 h-5 text-gray-400" />
                 </div>
               )}

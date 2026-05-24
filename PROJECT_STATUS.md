@@ -102,7 +102,6 @@ Then:
 ## 📝 What Still Needs to Be Done
 
 1. **Backend Setup:**
-   - [ ] Upgrade to Node.js 20+ (currently v18.19.1)
    - [ ] Run backend: `npm run start:dev`
    - [ ] Test API endpoints at http://localhost:3001
 

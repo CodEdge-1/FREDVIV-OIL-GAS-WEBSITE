@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
-import { getSession, getAccounts, changePassword, updateProfile, logout } from '../../lib/auth';
-import { getPrices, getNotifications, markNotificationRead, markAllNotificationsRead, type AppNotification } from '../../lib/store';
+import { getSession, logout, StaffAccount, Role } from '../../lib/auth'; // Import Role
+import { type AppNotification } from '../../lib/store'; // Keep type for now, will replace with backend type
 import { toast } from 'sonner';
 import {
   User,
@@ -16,6 +16,8 @@ import {
   CheckCheck,
   BellOff,
 } from 'lucide-react';
+import { api } from '../../lib/api';
+import { ProfileSection } from './ProfileSection';
 
 type Tab = 'profile' | 'notifications' | 'branch';
 
@@ -125,192 +127,44 @@ function SaveButton({ onClick, saved }: { onClick: () => void; saved: boolean })
 
 // ── Tab Sections ─────────────────────────────────────────────────────────────
 
-function ProfileSection() {
-  const session = getSession();
-  const account = session ? getAccounts().find((a) => a.id === session.id) : null;
-
-  const [name, setName] = useState(account?.name ?? '');
-  const [email] = useState(account?.email ?? '');
-  const [phone, setPhone] = useState(account?.phone ?? '');
-  const [currentPwd, setCurrentPwd] = useState('');
-  const [newPwd, setNewPwd] = useState('');
-  const [confirmPwd, setConfirmPwd] = useState('');
-  const [showCurrent, setShowCurrent] = useState(false);
-  const [showNew, setShowNew] = useState(false);
-  const [currentPwdVerified, setCurrentPwdVerified] = useState(false);
-  const [profileSaved, setProfileSaved] = useState(false);
-  const [pwdSaved, setPwdSaved] = useState(false);
-
-  const handleSaveProfile = () => {
-    if (!session) return;
-    updateProfile(session.id, { name, phone });
-    setProfileSaved(true);
-    toast.success('Profile updated successfully');
-    setTimeout(() => setProfileSaved(false), 2000);
-  };
-
-  const handleVerifyCurrentPwd = () => {
-    if (!currentPwd) {
-      toast.error('Please enter your current password');
-      return;
-    }
-    const s = getSession();
-    if (!s) { toast.error('Session expired. Please log in again.'); return; }
-    const acc = getAccounts().find((a) => a.id === s.id);
-    if (!acc || acc.password !== currentPwd) {
-      toast.error('Current password is incorrect');
-      return;
-    }
-    setCurrentPwdVerified(true);
-    toast.success('Password verified — enter your new password below');
-  };
-
-  const handleSavePassword = () => {
-    if (!newPwd || !confirmPwd) {
-      toast.error('Please fill in all password fields');
-      return;
-    }
-    if (newPwd !== confirmPwd) {
-      toast.error('New passwords do not match');
-      return;
-    }
-    if (newPwd.length < 8) {
-      toast.error('New password must be at least 8 characters');
-      return;
-    }
-    const s = getSession();
-    if (!s) { toast.error('Session expired. Please log in again.'); return; }
-    changePassword(s.id, newPwd);
-    setPwdSaved(true);
-    toast.success('Password changed successfully');
-    setCurrentPwd('');
-    setNewPwd('');
-    setConfirmPwd('');
-    setCurrentPwdVerified(false);
-    setTimeout(() => setPwdSaved(false), 2000);
-  };
-
-  return (
-    <div className="space-y-6">
-      <SectionCard
-        title="Personal Information"
-        description="Update your name, email address, and contact number."
-      >
-        <div className="grid sm:grid-cols-2 gap-4 mb-6">
-          <Field label="Full Name">
-            <TextInput value={name} onChange={setName} autoComplete="name" />
-          </Field>
-          <Field label="Email Address" hint="Email is used for login and cannot be changed here.">
-            <TextInput value={email} type="email" disabled autoComplete="off" />
-          </Field>
-          <Field label="Phone Number">
-            <TextInput value={phone} onChange={setPhone} type="tel" placeholder="Enter phone number" autoComplete="off" />
-          </Field>
-          <Field label="Role">
-            <TextInput value="Branch Manager" disabled />
-          </Field>
-        </div>
-        <SaveButton onClick={handleSaveProfile} saved={profileSaved} />
-      </SectionCard>
-
-      <SectionCard
-        title="Change Password"
-        description="Choose a strong password that is at least 8 characters long."
-      >
-        <div className="space-y-4 mb-6">
-          {/* Step 1: Verify current password */}
-          <Field label="Current Password">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <TextInput
-                  value={currentPwd}
-                  onChange={(v) => { setCurrentPwd(v); setCurrentPwdVerified(false); }}
-                  type={showCurrent ? 'text' : 'password'}
-                  placeholder="Enter current password"
-                  autoComplete="off"
-                  disabled={currentPwdVerified}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowCurrent(!showCurrent)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                >
-                  {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {currentPwdVerified ? (
-                <div className="flex items-center gap-1.5 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm flex-shrink-0">
-                  <ShieldCheck className="w-4 h-4" />
-                  Verified
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleVerifyCurrentPwd}
-                  className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded-lg transition-colors flex-shrink-0"
-                >
-                  Verify
-                </button>
-              )}
-            </div>
-          </Field>
-
-          {/* Step 2: New password fields — only shown after verification */}
-          {currentPwdVerified && (
-            <div className="grid sm:grid-cols-2 gap-4 pt-2 border-t border-gray-700">
-              <Field label="New Password">
-                <div className="relative">
-                  <TextInput
-                    value={newPwd}
-                    onChange={setNewPwd}
-                    type={showNew ? 'text' : 'password'}
-                    placeholder="Min. 8 characters"
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowNew(!showNew)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                  >
-                    {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </Field>
-              <Field label="Confirm New Password">
-                <TextInput
-                  value={confirmPwd}
-                  onChange={setConfirmPwd}
-                  type="password"
-                  placeholder="Re-enter new password"
-                  autoComplete="new-password"
-                />
-              </Field>
-            </div>
-          )}
-        </div>
-        {currentPwdVerified && <SaveButton onClick={handleSavePassword} saved={pwdSaved} />}
-      </SectionCard>
-    </div>
-  );
-}
-
 function NotificationsSection() {
-  const session = getSession();
-  const recipientId = session?.id ?? '';
-  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
-    recipientId ? getNotifications(recipientId) : []
-  );
+  const session = getSession(); // Assuming getSession still works for current user ID
+  const recipientId = session?.id || '';
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  const fetchNotifications = async () => {
+    if (!recipientId) return;
+    try {
+      const data = await api.get(`/users/${recipientId}/notifications`);
+      setNotifications(data);
+    } catch (error) {
+      console.error('Failed to fetch notifications:', error);
+      toast.error('Failed to load notifications.');
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [recipientId]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  const handleMarkRead = (id: string) => {
-    markNotificationRead(id);
-    setNotifications(getNotifications(recipientId));
+  const handleMarkRead = async (id: string) => {
+    try {
+      await api.patch(`/users/${recipientId}/notifications/${id}`, { read: true });
+      fetchNotifications(); // Re-fetch to update UI
+    } catch (error) {
+      toast.error('Failed to mark notification as read.');
+    }
   };
 
-  const handleMarkAllRead = () => {
-    markAllNotificationsRead(recipientId);
-    setNotifications(getNotifications(recipientId));
+  const handleMarkAllRead = async () => {
+    try {
+      await api.patch(`/users/${recipientId}/notifications/mark-all-read`);
+      fetchNotifications(); // Re-fetch to update UI
+    } catch (error) {
+      toast.error('Failed to mark all notifications as read.');
+    }
   };
 
   const formatTime = (iso: string) => {
@@ -384,10 +238,27 @@ function NotificationsSection() {
 }
 
 function BranchSection() {
-  const session = getSession();
-  const account = session ? getAccounts().find((a) => a.id === session.id) : null;
-  const prices = getPrices();
+  const session = getSession(); // Assuming getSession still works for current user ID
+  const [account, setAccount] = useState<StaffAccount | null>(null);
+  const [prices, setPrices] = useState({ pms: 0, ago: 0 });
 
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!session?.id) return;
+      try {
+        const [userData, priceData] = await Promise.all([
+          api.get(`/users/${session.id}`),
+          api.get('/prices'), // Assuming an endpoint for global prices
+        ]);
+        setAccount(userData);
+        setPrices(priceData);
+      } catch (error) {
+        console.error('Failed to fetch branch data:', error);
+        toast.error('Failed to load branch data.');
+      }
+    };
+    fetchData();
+  }, [session?.id]);
   const [defaultView, setDefaultView] = useState('pms-ago');
   const [showOverageWarning, setShowOverageWarning] = useState(true);
   const [autoCalc, setAutoCalc] = useState(true);
@@ -493,7 +364,7 @@ export function ManagerSettings() {
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="manager" onLogout={handleLogout} />
+      <Sidebar role="MANAGER" onLogout={handleLogout} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
@@ -532,7 +403,7 @@ export function ManagerSettings() {
 
             {/* Tab Content */}
             <div className="flex-1 min-w-0">
-              {activeTab === 'profile' && <ProfileSection />}
+              {activeTab === 'profile' && <ProfileSection roleLabel="Branch Manager" />}
               {activeTab === 'notifications' && <NotificationsSection />}
               {activeTab === 'branch' && <BranchSection />}
             </div>

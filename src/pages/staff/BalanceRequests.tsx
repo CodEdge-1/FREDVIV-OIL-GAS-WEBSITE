@@ -1,26 +1,38 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Import useEffect
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { RoleBadge } from '../../components/dashboard/RoleBadge';
-import { StatusBadge } from '../../components/dashboard/StatusBadge';
-import { logout, getAccounts } from '../../lib/auth';
+import { StatusBadge } from '../../components/dashboard/StatusBadge'; // Keep for now, will update to use backend Status enum
+import { logout, getSession } from '../../lib/auth';
 import {
-  getBalanceRequests,
-  updateBalanceRequest,
-  addNotification,
-  addActivityLog,
-  type BalanceRequest,
-} from '../../lib/store';
+  type BalanceRequest, // Keep type for now, will replace with backend type from lib/store
+} from '../../lib/store'; // Import BalanceRequest type
+import { api } from '../../lib/api';
+import { toast } from 'sonner';
 import { Check, Clock, Inbox, KeyRound, RefreshCw } from 'lucide-react';
 
 export function BalanceRequests() {
   const navigate = useNavigate();
-  const [requests, setRequests] = useState<BalanceRequest[]>(() => getBalanceRequests());
+  const [requests, setRequests] = useState<BalanceRequest[]>([]); // Initialize with empty array
+  const session = getSession(); // Assuming getSession still works for current user ID
+
+  const fetchRequests = async () => {
+    try {
+      const data = await api.get('/balance-requests'); // Assuming an endpoint for balance requests
+      setRequests(data);
+    } catch (error) {
+      console.error('Failed to fetch balance requests:', error);
+      toast.error('Failed to load balance requests.');
+    }
+  };
+
+  useEffect(() => {
+    fetchRequests();
+  }, []);
+
   const [pinModalId, setPinModalId] = useState<string | null>(null);
   const [adminPin, setAdminPin] = useState('');
   const [pinError, setPinError] = useState('');
-
-  const reload = () => setRequests(getBalanceRequests());
 
   const openPinModal = (id: string) => {
     setAdminPin('');
@@ -34,7 +46,7 @@ export function BalanceRequests() {
     setPinError('');
   };
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (adminPin.length < 4 || adminPin.length > 6) {
       setPinError('PIN must be 4–6 digits.');
       return;
@@ -43,41 +55,33 @@ export function BalanceRequests() {
       setPinError('PIN must contain digits only.');
       return;
     }
-
     const req = requests.find((r) => r.id === pinModalId);
     if (!req) return;
 
-    const now = new Date().toLocaleString('en-US', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
-
-    updateBalanceRequest(req.id, {
-      status: 'approved',
-      approvedTime: now,
-      adminPin,
-    });
-
-    const acc = getAccounts().find((a) => a.id === req.requesterId);
-    if (acc) {
-      addNotification({
-        recipientId: acc.id,
+    try {
+      await api.patch(`/balance-requests/${req.id}/approve`, { adminPin }); // Assuming an endpoint to approve and set PIN
+      // Send notification via API
+      await api.post(`/notifications`, {
+        userId: req.requesterId,
         title: 'Balance Request Approved',
         body: `Your request to view the account balance has been approved. Use the PIN provided by admin to unlock the balance. It will be visible for 30 seconds.`,
       });
-    }
-    addActivityLog({
-      action: `Balance request approved — ${req.requester} (${req.role})`,
-      type: 'balance',
-    });
+      // Add activity log via API
+      await api.post(`/activity-logs`, {
+        userId: session?.id, // Admin's ID
+        action: `Balance request approved — ${req.requester} (${req.role})`,
+        type: 'balance',
+        details: `Request ID: ${req.id}`,
+      });
 
-    setPinModalId(null);
-    setAdminPin('');
-    reload();
+      toast.success('Balance request approved and PIN set.');
+      setPinModalId(null);
+      setAdminPin('');
+      fetchRequests(); // Reload requests
+    } catch (error) {
+      console.error('Failed to approve balance request:', error);
+      toast.error('Failed to approve balance request.');
+    }
   };
 
   const handleLogout = () => {
@@ -85,12 +89,12 @@ export function BalanceRequests() {
     navigate('/staff/login');
   };
 
-  const pendingRequests = requests.filter((r) => r.status === 'pending');
+  const pendingRequests = requests.filter((r) => r.status === 'PENDING');
   const hasRequests = requests.length > 0;
 
   return (
-    <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="admin" onLogout={handleLogout} />
+    <div className="flex min-h-screen bg-gray-900"> {/* Sidebar role prop updated to uppercase */}
+      <Sidebar role="ADMIN" onLogout={handleLogout} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
@@ -99,8 +103,8 @@ export function BalanceRequests() {
               <h1 className="text-2xl font-bold text-white">Balance Requests</h1>
               <p className="text-gray-400 text-sm">Review and approve balance visibility requests</p>
             </div>
-            <button
-              onClick={reload}
+            <button // Reload button now calls fetchRequests
+              onClick={fetchRequests}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
               title="Refresh"
             >

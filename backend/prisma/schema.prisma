@@ -1,3 +1,6 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -5,7 +8,7 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  directUrl = env("DIRECT_URL") // Recommended for Neon migrations
 }
 
 enum Role {
@@ -17,25 +20,29 @@ enum Role {
 
 enum UserStatus {
   ACTIVE
+  SUSPENDED
+  PENDING
   INACTIVE
 }
 
-enum SalesReportStatus {
-  DRAFT
-  SUBMITTED
-  APPROVED
-}
-
-enum ExpenseStatus {
+enum RequestStatus {
   PENDING
+  SUBMITTED
   APPROVED
   REJECTED
 }
 
-enum BalanceRequestStatus {
-  PENDING
-  APPROVED
-  EXPIRED
+enum ActivityType {
+  EXPENSE
+  PRICE
+  BALANCE
+  SECURITY
+  USER
+}
+
+enum ProductType {
+  PMS
+  AGO
 }
 
 enum TransactionType {
@@ -44,139 +51,175 @@ enum TransactionType {
 }
 
 model User {
-  id           String     @id @default(cuid())
-  name         String
+  id           String     @id @default(uuid())
   email        String     @unique
   passwordHash String
-  pinHash      String?
+  name         String
   role         Role
   status       UserStatus @default(ACTIVE)
   branchId     String?
-  branch       Branch?    @relation(fields: [branchId], references: [id])
+  location     String?
+  phone        String?
+  pinHash      String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
-  salesReports     SalesReport[]
-  expenses         Expense[]
-  approvedExpenses Expense[]        @relation("ExpenseApprover")
-  balanceRequests  BalanceRequest[]
-  approvedRequests BalanceRequest[] @relation("BalanceApprover")
-  fuelPrices       FuelPrice[]
-  sentMessages     ChatMessage[]    @relation("Sender")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Branch {
-  id       String @id @default(cuid())
-  name     String
-  location String
-
-  users        User[]
-  salesReports SalesReport[]
-  expenses     Expense[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  branch              Branch?            @relation(fields: [branchId], references: [id])
+  salesReports        SalesReport[]      @relation("ReportManager")
+  expenses            Expense[]          @relation("ExpenseManager")
+  approvedExpenses    Expense[]          @relation("ExpenseApprover")
+  notifications       Notification[]
+  activityLogs        ActivityLog[]
+  balanceRequests     BalanceRequest[]
+  bankAccessRequests  BankAccessRequest[]
+  chatMessages        ChatMessage[]
 }
 
 model SalesReport {
-  id        String @id @default(cuid())
-  branchId  String
-  branch    Branch @relation(fields: [branchId], references: [id])
+  id             String   @id @default(uuid())
+  date           String   // Stored as YYYY-MM-DD to avoid timezone shifting on the frontend
+  openingPMS     Float
+  soldPMS        Float
+  remainingPMS   Float
+  openingAGO     Float
+  soldAGO        Float
+  remainingAGO   Float
+  overage        Float    @default(0)
+  pmsPrice       Float
+  agoPrice       Float
+  pmsSales       Float
+  agoSales       Float
+  totalSales     Float
+  cardPayments   Float
+  bankTransfers  Float
+  cashPayments   Float
+  totalPayments  Float
+  status         RequestStatus @default(PENDING)
+  submittedAt    DateTime      @default(now())
+  branchId       String
+  branch         Branch        @relation(fields: [branchId], references: [id])
+  location       String
+
+  manager   User   @relation("ReportManager", fields: [managerId], references: [id])
   managerId String
-  manager   User   @relation(fields: [managerId], references: [id])
-
-  date         DateTime @db.Date
-  openingPMS   Float
-  openingAGO   Float
-  soldPMS      Float
-  soldAGO      Float
-  remainingPMS Float
-  remainingAGO Float
-  overage      Float    @default(0)
-
-  pmsPrice   Float
-  agoPrice   Float
-  totalSales Float
-
-  cardPayments  Float
-  bankTransfers Float
-  cashPayments  Float
-
-  status      SalesReportStatus @default(DRAFT)
-  submittedAt DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([branchId, date])
 }
 
 model Expense {
-  id            String @id @default(cuid())
-  branchId      String
-  branch        Branch @relation(fields: [branchId], references: [id])
-  submittedById String
-  submittedBy   User   @relation(fields: [submittedById], references: [id])
-
+  id          String        @id @default(uuid())
   type        String
   description String
   amount      Float
-  date        DateTime @db.Date
+  date        String        // Changed to String to match SalesReport logic
+  status      RequestStatus @default(PENDING)
+  branchId    String
+  branch      Branch        @relation(fields: [branchId], references: [id])
+  createdAt   DateTime      @default(now())
 
-  status       ExpenseStatus @default(PENDING)
+  manager      User   @relation("ExpenseManager", fields: [managerId], references: [id])
+  managerId    String
+  approvedBy   User?  @relation("ExpenseApprover", fields: [approvedById], references: [id])
   approvedById String?
-  approvedBy   User?         @relation("ExpenseApprover", fields: [approvedById], references: [id])
-  approvedAt   DateTime?
-  rejectReason String?
+}
 
-  createdAt DateTime @default(now())
+model Branch {
+  id           String        @id @default(uuid())
+  name         String        @unique
+  location     String?
+  users        User[]
+  salesReports SalesReport[]
+  expenses     Expense[]
+}
+
+model Price {
+  id        String   @id @default("current") // Enforces a single row for global prices
+  pms       Float    @default(0)
+  ago       Float    @default(0)
   updatedAt DateTime @updatedAt
 }
 
-model FuelPrice {
-  id      String @id @default(cuid())
-  setById String
-  setBy   User   @relation(fields: [setById], references: [id])
-
-  pmsPrice      Float
-  agoPrice      Float
-  effectiveFrom DateTime @default(now())
-
-  createdAt DateTime @default(now())
+model PriceHistory {
+  id        String      @id @default(uuid())
+  product   ProductType
+  oldPrice  Float
+  newPrice  Float
+  date      DateTime    @default(now())
+  adminId   String
 }
 
-model BalanceRequest {
-  id            String @id @default(cuid())
-  requestedById String
-  requestedBy   User   @relation(fields: [requestedById], references: [id])
+model FuelPrice {
+  id            String   @id @default(uuid())
+  pms           Float
+  ago           Float
+  effectiveFrom DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
 
-  status       BalanceRequestStatus @default(PENDING)
-  approvedById String?
-  approvedBy   User?                @relation("BalanceApprover", fields: [approvedById], references: [id])
-  approvedAt   DateTime?
-  expiresAt    DateTime?
+model Notification {
+  id          String   @id @default(uuid())
+  title       String
+  body        String
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
 
+  recipient   User     @relation(fields: [recipientId], references: [id])
+  recipientId String
+}
+
+model ActivityLog {
+  id        String       @id @default(uuid())
+  action    String
+  type      ActivityType
+  details   String?
+  createdAt DateTime     @default(now())
+
+  user      User         @relation(fields: [userId], references: [id])
+  userId    String
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  text      String
+  senderId  String
+  sender    User     @relation(fields: [senderId], references: [id])
   createdAt DateTime @default(now())
 }
 
 model Transaction {
-  id          String          @id @default(cuid())
-  reference   String          @unique
-  description String
-  amount      Float
-  type        TransactionType
-  date        DateTime        @db.Date
-
-  createdAt DateTime @default(now())
+  id            String          @id @default(uuid())
+  date          DateTime        @default(now())
+  valueDate     DateTime?
+  description   String
+  reference     String?
+  type          TransactionType
+  amount        Float
+  balance       Float
+  createdAt     DateTime        @default(now())
 }
 
-model ChatMessage {
-  id       String @id @default(cuid())
-  senderId String
-  sender   User   @relation("Sender", fields: [senderId], references: [id])
-  roomId   String
-  content  String
+model BalanceRequest {
+  id           String        @id @default(uuid())
+  role         Role
+  status       RequestStatus @default(PENDING)
+  requestTime  DateTime      @default(now())
+  approvedTime DateTime?
+  adminPin     String?
+  pinUsed      Boolean       @default(false)
 
-  createdAt DateTime @default(now())
+  requester    User          @relation(fields: [requesterId], references: [id])
+  requesterId  String
+}
+
+model BankAccessRequest {
+  id            String        @id @default(uuid())
+  bankId        String        // 'uba' | 'zenith'
+  bankName      String
+  status        RequestStatus @default(PENDING)
+  requestTime   DateTime      @default(now())
+  approvedTime  DateTime?
+  loginUsername String?
+  loginPassword String?
+  expiresAt     DateTime?
+
+  requester     User          @relation(fields: [requesterId], references: [id])
+  requesterId   String
 }

@@ -1,16 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react'; // Added useEffect
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
-import { logout, getSession, getAccounts } from '../../lib/auth';
+import { logout, getSession, StaffAccount } from '../../lib/auth'; // Keep StaffAccount type for now
 import { CountdownTimer } from '../../components/dashboard/CountdownTimer';
 import {
-  getSalesReports,
-  saveBalanceRequest,
-  getPendingBalanceRequest,
-  getApprovedBalanceRequest,
-  updateBalanceRequest,
-  addNotification,
-  type BalanceRequest,
+  type SalesReport, // Keep type for now, will replace with backend type
+} from '../../lib/store'; // Remove local storage functions
+import { api } from '../../lib/api';
+import { StatCard } from '../../components/dashboard/StatCard';
+import { toast } from 'sonner';
+import {
+  type BalanceRequest, // Keep type for now, will replace with backend type from lib/store
 } from '../../lib/store';
 import {
   ClipboardCheck,
@@ -28,12 +28,20 @@ const formatCurrency = (amount: number) =>
 export function AuditorDashboard() {
   const navigate = useNavigate();
   const session = getSession();
+  const [allReports, setAllReports] = useState<SalesReport[]>([]);
+  const [users, setUsers] = useState<StaffAccount[]>([]);
+  const [pendingRequest, setPendingRequest] = useState<BalanceRequest | null>(null);
+  const [approvedRequest, setApprovedRequest] = useState<BalanceRequest | null>(null);
+  const [showPinEntry, setShowPinEntry] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [balanceVisible, setBalanceVisible] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const allReports = getSalesReports();
   const today = new Date().toISOString().split('T')[0];
   const todayReports = allReports.filter((r) => r.date === today);
   const discrepancies = allReports.filter((r) => r.totalSales !== r.totalPayments);
-  const branches = new Set(getAccounts().map((a) => a.branch).filter(Boolean)).size;
+  const branches = new Set(users.map((a) => a.branch).filter(Boolean)).size;
   const totalRevenue = allReports.reduce((sum, r) => sum + r.totalSales, 0);
 
   const stats = [
@@ -43,17 +51,28 @@ export function AuditorDashboard() {
     { label: 'Branches Monitored', value: branches, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20', icon: ShieldCheck },
   ];
 
-  const [pendingRequest, setPendingRequest] = useState<BalanceRequest | null>(
-    () => session ? getPendingBalanceRequest(session.id) : null
-  );
-  const [approvedRequest, setApprovedRequest] = useState<BalanceRequest | null>(
-    () => session ? getApprovedBalanceRequest(session.id) : null
-  );
-  const [showPinEntry, setShowPinEntry] = useState(false);
-  const [pinInput, setPinInput] = useState('');
-  const [pinError, setPinError] = useState('');
-  const [balanceVisible, setBalanceVisible] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fetchDashboardData = async () => {
+    if (!session?.id) return;
+    try {
+      const [reportsData, usersData, pendingReqData, approvedReqData] = await Promise.all([
+        api.get('/sales-reports'), // Assuming endpoint for all sales reports
+        api.get('/users'), // Assuming endpoint for all users
+        api.get(`/balance-requests/pending/${session.id}`), // Assuming endpoint for user's pending balance request
+        api.get(`/balance-requests/approved/${session.id}`), // Assuming endpoint for user's approved balance request
+      ]);
+      setAllReports(reportsData);
+      setUsers(usersData);
+      setPendingRequest(pendingReqData);
+      setApprovedRequest(approvedReqData);
+    } catch (error) {
+      console.error('Failed to fetch auditor dashboard data:', error);
+      toast.error('Failed to load dashboard data.');
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [session?.id]);
 
   // Poll localStorage every 3s while a pending request exists
   useEffect(() => {
@@ -61,54 +80,59 @@ export function AuditorDashboard() {
 
     if (pendingRequest) {
       pollRef.current = setInterval(() => {
-        const approved = getApprovedBalanceRequest(session.id);
-        if (approved) {
-          setPendingRequest(null);
-          setApprovedRequest(approved);
-          setShowPinEntry(true);
-          clearInterval(pollRef.current!);
-        }
+        // Poll API for approved request status
+        api.get(`/balance-requests/approved/${session.id}`).then(approved => {
+          if (approved) {
+            setPendingRequest(null);
+            setApprovedRequest(approved);
+            setShowPinEntry(true);
+            clearInterval(pollRef.current!);
+          }
+        }).catch(err => console.error('Polling for approved request failed:', err));
       }, 3000);
     }
 
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [pendingRequest]);
 
-  const handleRequestBalance = () => {
+  const handleRequestBalance = async () => {
     if (!session) return;
-    const now = new Date().toLocaleString('en-US', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hour12: true,
-    });
-    const req: BalanceRequest = {
-      id: `BAL-${Date.now()}`,
-      requesterId: session.id,
-      requester: session.name,
-      role: 'auditor',
-      requestTime: now,
-      status: 'pending',
-    };
-    saveBalanceRequest(req);
-    addNotification({
-      recipientId: 'admin',
-      title: 'Balance Request Submitted',
-      body: `${session?.name} (Auditor) has requested access to view the account balance.`,
-    });
-    setPendingRequest(req);
+    try {
+      const newRequest = await api.post('/balance-requests', {
+        requesterId: session.id,
+        requester: session.name,
+        role: 'AUDITOR', // Ensure role matches Prisma enum
+        status: 'PENDING', // Ensure status matches Prisma enum
+      });
+      toast.success('Balance request submitted to admin.');
+      setPendingRequest(newRequest);
+      // Send notification to admin via API
+      await api.post('/notifications', {
+        userId: 'admin', // Assuming 'admin' is the ID for the admin user
+        title: 'Balance Request Submitted',
+        body: `${session?.name} (Auditor) has requested access to view the account balance.`,
+      });
+    } catch (error) {
+      console.error('Failed to submit balance request:', error);
+      toast.error('Failed to submit balance request.');
+    }
   };
 
-  const handlePinSubmit = () => {
+  const handlePinSubmit = async () => {
     if (!approvedRequest) return;
-    if (pinInput === approvedRequest.adminPin) {
-      updateBalanceRequest(approvedRequest.id, { pinUsed: true });
+    try {
+      // Use the new backend validation endpoint
+      await api.post(`/balance-requests/${approvedRequest.id}/validate`, { pin: pinInput });
+      
       setShowPinEntry(false);
       setPinInput('');
       setPinError('');
       setApprovedRequest(null);
       setPendingRequest(null);
       setBalanceVisible(true);
-    } else {
-      setPinError('Incorrect PIN. Please check with admin and try again.');
+      toast.success('Balance unlocked!');
+    } catch (error: any) {
+      setPinError(error.response?.data?.message || 'Incorrect PIN.');
     }
   };
 
@@ -118,7 +142,7 @@ export function AuditorDashboard() {
 
   return (
     <div className="flex min-h-screen bg-gray-900">
-      <Sidebar role="auditor" onLogout={() => { logout(); navigate('/staff/login'); }} />
+      <Sidebar role="AUDITOR" onLogout={() => { logout(); navigate('/staff/login'); }} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
@@ -131,14 +155,16 @@ export function AuditorDashboard() {
         <main className="p-6 space-y-6">
           {/* Stats */}
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {stats.map((stat) => (
-              <div key={stat.label} className={`bg-gray-800 border rounded-xl p-5 ${stat.bg}`}>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-gray-400 text-sm">{stat.label}</p>
-                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
-                </div>
-                <p className={`text-3xl font-bold ${stat.color}`}>{stat.value}</p>
-              </div>
+            {stats.map((stat, i) => (
+              <StatCard
+                key={i}
+                variant="auditor"
+                label={stat.label}
+                value={stat.value}
+                icon={stat.icon}
+                color={stat.color}
+                containerClass={stat.bg}
+              />
             ))}
           </div>
 
