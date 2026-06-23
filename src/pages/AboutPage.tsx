@@ -1,5 +1,5 @@
 import { Target, Award, Users, TrendingUp, Quote } from 'lucide-react';
-import { ImageWithFallback } from '../components/figma/ImageWithFallback';
+import { ImageWithFallback } from '../components/ui/ImageWithFallback';
 
 export function AboutPage() {
   return (

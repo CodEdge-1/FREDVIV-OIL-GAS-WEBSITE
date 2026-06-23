@@ -1,0 +1,13 @@
+{
+  "companyName": "Fredviv Oil & Gas Ltd. - Test 1782003779344",
+  "reportDeadline": "18:00",
+  "balanceDuration": "30",
+  "pinLength": "6",
+  "timezone": "Africa/Lagos",
+  "currency": "NGN",
+  "sessionTimeout": 45,
+  "requirePinForBalance": true,
+  "logActivity": true,
+  "twoFactor": false,
+  "requirePin": true
+}

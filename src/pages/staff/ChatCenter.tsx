@@ -2,23 +2,28 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { RoleBadge } from '../../components/dashboard/RoleBadge';
-import { logout, getSession, Role, StaffAccount } from '../../lib/auth';
+import { logout, getSession, getAuthToken, Role, StaffAccount } from '../../lib/auth';
 import { Plus, X, Lock, Paperclip, Image, FileText, Download, Trash2, Search, Hash, Send } from 'lucide-react';
-import { toast } from 'sonner'; // Import toast
-import { api } from '../../lib/api'; // Import api
+import { toast } from 'sonner';
+import { api } from '../../lib/api';
+import { io, Socket } from 'socket.io-client';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const SOCKET_URL = API_BASE_URL.replace('/api', '');
 
 interface Attachment {
   name: string;
-  type: string; // MIME type
-  url: string;  // base64 data URL
-  size: number; // bytes
+  type: string;
+  url: string;
+  size: number;
 }
 
 interface Message {
   id: string;
+  roomId: string;
   senderId: string;
   sender: string;
-  role: Role; // Use imported Role
+  role: Role;
   text: string;
   timestamp: Date;
   attachment?: Attachment;
@@ -28,63 +33,28 @@ interface Conversation {
   id: string;
   type: 'broadcast' | 'direct';
   name: string;
-  role?: Role; // Use imported Role
+  role?: Role;
   online: boolean;
   messages: Message[];
   unread: number;
 }
 
-// Serialized form stored in localStorage
-interface StoredMessage {
-  id: string;
-  senderId: string;
-  sender: string;
-  role: Role; // Use imported Role
-  text: string;
-  timestamp: string;
-  attachment?: Attachment;
-}
-
-interface PrivateChatData {
-  staffId: string;
-  staffName: string;
-  staffRole: Role; // Use imported Role
-  messages: StoredMessage[];
-}
-
-const PRIVATE_CHATS_KEY = 'fredviv_private_chats';
-const BROADCAST_MESSAGES_KEY = 'fredviv_broadcast_messages';
-
-function loadPrivateChats(): Record<string, PrivateChatData> {
-  try {
-    return JSON.parse(localStorage.getItem(PRIVATE_CHATS_KEY) || '{}');
-  } catch {
-    return {};
-  }
-}
-
-function savePrivateChats(chats: Record<string, PrivateChatData>) {
-  localStorage.setItem(PRIVATE_CHATS_KEY, JSON.stringify(chats));
-}
-
-function loadBroadcastMessages(): StoredMessage[] {
-  try {
-    return JSON.parse(localStorage.getItem(BROADCAST_MESSAGES_KEY) || '[]');
-  } catch {
-    return [];
-  }
-}
-
-function saveBroadcastMessages(messages: StoredMessage[]) {
-  localStorage.setItem(BROADCAST_MESSAGES_KEY, JSON.stringify(messages));
-}
-
-function deserializeMessages(stored: StoredMessage[]): Message[] {
-  return stored.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }));
-}
-
-function serializeMessage(msg: Message): StoredMessage {
-  return { ...msg, timestamp: msg.timestamp.toISOString() };
+function mapBackendMessage(msg: any): Message {
+  return {
+    id: msg.id,
+    roomId: msg.roomId || 'broadcast',
+    senderId: msg.senderId,
+    sender: msg.sender?.name || 'Unknown',
+    role: msg.sender?.role as Role,
+    text: msg.text || '',
+    timestamp: new Date(msg.createdAt),
+    attachment: msg.attachmentUrl ? {
+      url: msg.attachmentUrl,
+      name: msg.attachmentName || 'Attachment',
+      type: msg.attachmentType || 'application/octet-stream',
+      size: msg.attachmentSize || 0,
+    } : undefined
+  };
 }
 
 function formatTime(date: Date): string {
@@ -129,57 +99,9 @@ export function ChatCenter() {
 
   const session = getSession();
   const currentUser = { id: session?.id ?? role, name: session?.name ?? 'Unknown' };
-  const isAdmin = role === Role.ADMIN; // Compare with enum member
+  const isAdmin = role === Role.ADMIN;
 
-  function buildConversations() {
-    const broadcastMsgs = deserializeMessages(loadBroadcastMessages());
-    const result: Conversation[] = [ // Explicitly type result
-      {
-        id: 'broadcast',
-        type: 'broadcast',
-        name: 'All Staff',
-        online: true,
-        unread: 0,
-        messages: broadcastMsgs,
-      },
-    ];
-
-    const privateChats = loadPrivateChats();
-
-    if (isAdmin) {
-      // Admin sees all private conversations
-      for (const [convId, data] of Object.entries(privateChats) as [string, PrivateChatData][]) { // Explicitly type Object.entries
-        result.push({
-          id: convId,
-          type: 'direct',
-          name: data.staffName,
-          role: data.staffRole,
-          online: false,
-          unread: 0,
-          messages: deserializeMessages(data.messages),
-        });
-      }
-    } else {
-      // Staff sees only their own private conversation with admin
-      const myConvId = `dm-${currentUser.id}`;
-      if (privateChats[myConvId]) {
-        const data = privateChats[myConvId];
-        result.push({
-          id: myConvId,
-          type: 'direct',
-          name: 'Administrator', // Name is a string
-          role: Role.ADMIN,
-          online: false,
-          unread: 0,
-          messages: deserializeMessages(data.messages),
-        });
-      }
-    }
-
-    return result;
-  }
-
-  const [conversations, setConversations] = useState<Conversation[]>(() => buildConversations()); // Initialize with buildConversations
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string>('broadcast');
   const [inputText, setInputText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -189,163 +111,263 @@ export function ChatCenter() {
   const [hoveredMsgId, setHoveredMsgId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [staffList, setStaffList] = useState<StaffAccount[]>([]);
 
-  const activeConv = conversations.find((c) => c.id === activeId); // Remove non-null assertion
+  // 1. Fetch Staff List
+  useEffect(() => {
+    api.get('/users').then(users => {
+      setStaffList(users);
+    }).catch(console.error);
+  }, []);
 
-  const handleSelectConversation = (id: string) => { // Corrected function name
+  // 2. Build Conversations once Staff List is available
+  useEffect(() => {
+    const result: Conversation[] = [
+      {
+        id: 'broadcast',
+        type: 'broadcast',
+        name: 'All Staff',
+        online: true,
+        unread: 0,
+        messages: [],
+      },
+    ];
+
+    if (isAdmin) {
+      staffList.forEach(staff => {
+        if (staff.id !== currentUser.id) {
+          result.push({
+            id: `dm-${staff.id}`,
+            type: 'direct',
+            name: staff.name,
+            role: staff.role,
+            online: false,
+            unread: 0,
+            messages: [],
+          });
+        }
+      });
+    } else {
+      // Staff see a DM with Admin
+      result.push({
+        id: `dm-${currentUser.id}`,
+        type: 'direct',
+        name: 'Administrator',
+        role: Role.ADMIN,
+        online: false,
+        unread: 0,
+        messages: [],
+      });
+    }
+    
+    // Preserve messages if they exist
+    setConversations(prev => result.map(newConv => {
+      const existing = prev.find(p => p.id === newConv.id);
+      if (existing) {
+        return { ...newConv, messages: existing.messages, unread: existing.unread };
+      }
+      return newConv;
+    }));
+  }, [staffList, isAdmin, currentUser.id]);
+
+  // Fetch Last Messages for Previews
+  useEffect(() => {
+    if (conversations.length === 0) return;
+    
+    api.get('/chat/conversations/last-messages')
+      .then((lastMsgs: any[]) => {
+        setConversations(prev => prev.map(c => {
+          const match = lastMsgs.find(m => m.roomId === c.id);
+          if (match && c.messages.length === 0) {
+            return {
+              ...c,
+              messages: [mapBackendMessage(match.message)],
+            };
+          }
+          return c;
+        }));
+      })
+      .catch(console.error);
+  }, [conversations.length]);
+
+  // 3. Setup Socket.IO
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) return;
+
+    const newSocket = io(`${SOCKET_URL}/chat`, {
+      auth: { token }
+    });
+
+    newSocket.on('connect', () => {
+      console.log('Connected to chat server');
+      newSocket.emit('join-room', activeId);
+    });
+
+    newSocket.on('room-history', (msgs: any[]) => {
+      const mapped = msgs.map(mapBackendMessage);
+      setConversations(prev => prev.map(c => 
+        c.id === activeId ? { ...c, messages: mapped, unread: 0 } : c
+      ));
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    });
+
+    newSocket.on('new-message', (msg: any) => {
+      const mapped = mapBackendMessage(msg);
+      setConversations(prev => prev.map(c => {
+        if (c.id === mapped.roomId) {
+          const isAtBottom = messagesEndRef.current && 
+            messagesEndRef.current.scrollHeight - messagesEndRef.current.scrollTop <= messagesEndRef.current.clientHeight + 100;
+          
+          if (mapped.roomId === activeId && isAtBottom) {
+             setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+          }
+
+          return {
+            ...c,
+            messages: [...c.messages, mapped],
+            unread: mapped.roomId !== activeId ? c.unread + 1 : 0
+          };
+        }
+        return c;
+      }));
+    });
+
+    newSocket.on('message-deleted', (data: { roomId: string; messageId: string }) => {
+      setConversations(prev => prev.map(c => 
+        c.id === data.roomId ? { ...c, messages: c.messages.filter(m => m.id !== data.messageId) } : c
+      ));
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [activeId]);
+
+  // Handle room changes
+  useEffect(() => {
+    if (socket && socket.connected) {
+      socket.emit('join-room', activeId);
+    }
+  }, [activeId, socket]);
+
+  const activeConv = conversations.find((c) => c.id === activeId);
+
+  const handleSelectConversation = (id: string) => {
     setActiveId(id);
-    setConversations((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c))
-    );
+    setConversations(prev => prev.map(c => c.id === id ? { ...c, unread: 0 } : c));
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setAttachError('File too large. Maximum size is 5 MB.');
+    if (file.size > 10 * 1024 * 1024) {
+      setAttachError('File too large. Maximum size is 10 MB.');
       e.target.value = '';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setAttachment({ name: file.name, type: file.type, url: reader.result as string, size: file.size });
+
+    try {
+      setAttachError('Uploading...');
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // Use standard fetch to avoid api.post automatically stringifying the FormData
+      const token = getAuthToken();
+      const response = await fetch(`${API_BASE_URL}/chat/upload`, {
+        method: 'POST',
+        headers: {
+           ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const data = await response.json();
+
+      setAttachment({
+        name: data.name,
+        type: data.type,
+        url: data.url,
+        size: data.size,
+      });
       setAttachError('');
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    } catch (error) {
+      console.error('File upload failed', error);
+      setAttachError('File upload failed. Please try again.');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleSend = () => {
     const text = inputText.trim();
     if (!text && !attachment) return;
 
-    const newMessage: Message = {
-      id: `m-${Date.now()}`,
-      senderId: currentUser.id,
-      sender: currentUser.name,
-      role,
-      text,
-      timestamp: new Date(),
-      ...(attachment ? { attachment } : {}),
-    };
+    if (socket) {
+      socket.emit('send-message', {
+        roomId: activeId,
+        content: text,
+        attachment
+      });
 
-    const updateAndPersistMessage = (convId: string, message: Message) => {
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === convId
-            ? { ...c, messages: [...c.messages, message] }
-            : c
-        )
-      );
-
-      // Persist to localStorage
-      if (convId === 'broadcast') {
-        const stored = loadBroadcastMessages();
-        saveBroadcastMessages([...stored, serializeMessage(message)]);
-      } else {
-        const privateChats = loadPrivateChats();
-        if (privateChats[convId]) {
-          privateChats[convId].messages.push(serializeMessage(message));
-        } else {
-          // Staff sending first message creates the entry
-          privateChats[convId] = {
-            staffId: currentUser.id,
-            staffName: currentUser.name,
-            staffRole: role,
-            messages: [serializeMessage(message)],
-          };
-        }
-        savePrivateChats(privateChats);
-
-        // Notify the other person in this DM
-        const conv = conversations.find((c) => c.id === convId);
-        if (conv) {
-          // recipient is either admin (for staff) or the staff member (for admin)
-          const recipientId = isAdmin
-            ? convId.replace('dm-', '')   // admin messaging staff → staff's ID
-            : 'admin'; // staff messaging admin
-          const preview = message.text
-            ? (message.text.length > 60 ? message.text.slice(0, 60) + '…' : message.text)
-            : message.attachment
-            ? (message.attachment.type.startsWith('image/') ? '📷 Sent an image' : `📎 ${message.attachment.name}`)
-            : '';
-          // Fix: Use api.post for notifications instead of undefined addNotification
-          api.post('/notifications', {
-            recipientId,
-            title: `New message from ${currentUser.name}`,
-            body: preview,
-          }).catch(err => console.error('Failed to send notification:', err));
-        }
+      if (activeId !== 'broadcast') {
+        const recipientId = isAdmin ? activeId.replace('dm-', '') : 'admin';
+        const preview = text
+          ? (text.length > 60 ? text.slice(0, 60) + '…' : text)
+          : attachment
+          ? (attachment.type.startsWith('image/') ? '📷 Sent an image' : `📎 ${attachment.name}`)
+          : '';
+        
+        api.post('/notifications', {
+          recipientId,
+          title: `New message from ${currentUser.name}`,
+          body: preview,
+        }).catch(err => console.error('Failed to send notification:', err));
       }
-    };
-
-    // Fix: Ensure activeConv is defined before proceeding
-    if (!activeConv) return;
-
-    updateAndPersistMessage(activeId, newMessage);
+    }
 
     setInputText('');
     setAttachment(null);
   };
 
-  const handleDeleteMessage = (msgId: string, convId: string) => {
-    // Update state
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === convId
-          ? { ...c, messages: c.messages.filter((m) => m.id !== msgId) }
-          : c
-      )
-    );
-    // Persist to localStorage
-    if (convId === 'broadcast') {
-      saveBroadcastMessages(loadBroadcastMessages().filter((m) => m.id !== msgId));
-    } else {
-      const chats = loadPrivateChats();
-      if (chats[convId]) {
-        chats[convId].messages = chats[convId].messages.filter((m) => m.id !== msgId);
-        savePrivateChats(chats);
-      }
+  const handleDeleteMessage = async (msgId: string, convId: string) => {
+    if (!window.confirm("Are you sure you want to delete this message?")) return;
+    try {
+      await api.delete(`/chat/messages/${msgId}`);
+      toast.success("Message deleted");
+      setConversations(prev => prev.map(c => 
+        c.id === convId ? { ...c, messages: c.messages.filter(m => m.id !== msgId) } : c
+      ));
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || "Failed to delete message");
     }
-    setHoveredMsgId(null);
   };
 
-  // Admin opens a new private DM with a staff member
   const handleStartDM = (staff: StaffAccount) => {
     const convId = `dm-${staff.id}`;
     setShowNewDMModal(false);
 
-    // If already open, just switch to it
-    const existing = conversations.find((c: Conversation) => c.id === convId); // Explicitly type c
-    if (existing) {
-      setActiveId(convId);
-      return;
+    if (!conversations.find(c => c.id === convId)) {
+       setConversations(prev => [...prev, {
+         id: convId,
+         type: 'direct',
+         name: staff.name,
+         role: staff.role,
+         online: false,
+         unread: 0,
+         messages: []
+       }]);
     }
-
-    // Create entry in localStorage so staff can also see it
-    const privateChats = loadPrivateChats();
-    if (!privateChats[convId]) {
-      privateChats[convId] = {
-        staffId: staff.id,
-        staffName: staff.name,
-        staffRole: staff.role, // Use imported Role
-        messages: [],
-      };
-      savePrivateChats(privateChats);
-    }
-
-    const newConv: Conversation = {
-      id: convId,
-      type: 'direct',
-      name: staff.name,
-      role: staff.role, // Use imported Role
-      online: false,
-      unread: 0,
-      messages: [],
-    };
-
-    setConversations((prev) => [...prev, newConv]);
     setActiveId(convId);
   };
 
@@ -368,18 +390,11 @@ export function ChatCenter() {
   const broadcast = filteredConversations.filter((c) => c.type === 'broadcast');
   const directs = filteredConversations.filter((c) => c.type === 'direct');
 
-  // Staff list for new DM modal (active staff not already in a DM)
-  const [staffList, setStaffList] = useState<StaffAccount[]>([]); // Initialize with empty array
-  useEffect(() => {
-    api.get('/users').then(setStaffList).catch(console.error); // Fetch staff list
-  }, []);
-
-  const activeStaff = staffList.filter((a: StaffAccount) => a.status === 'ACTIVE');
-  const existingDMStaffIds = conversations.filter((c: Conversation) => c.type === 'direct')
+  const activeStaff = staffList.filter((a) => a.status === 'ACTIVE');
+  const existingDMStaffIds = conversations.filter((c) => c.type === 'direct')
     .map((c) => c.id.replace('dm-', ''));
-  const availableStaff = activeStaff.filter((s: StaffAccount) => !existingDMStaffIds.includes(s.id)); // Fix: Use availableStaff
+  const availableStaff = activeStaff.filter((s) => !existingDMStaffIds.includes(s.id));
 
-  // Fix: Safe grouping with activeConv guard
   const groupedMessages: { date: string; messages: Message[] }[] = [];
   if (activeConv) {
     for (const msg of activeConv.messages) {
@@ -473,16 +488,15 @@ export function ChatCenter() {
 
       {/* Message Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Conversation Header */}
         <header className="bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center gap-3 flex-shrink-0">
-          {activeConv?.type === 'broadcast' ? ( // Fix: Optional chaining
+          {activeConv?.type === 'broadcast' ? (
             <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center flex-shrink-0">
               <Hash className="w-5 h-5 text-primary" />
             </div>
           ) : (
             <div className="relative flex-shrink-0">
               <div className="w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center text-white font-bold">
-                {activeConv.name.charAt(0)}
+                {activeConv?.name.charAt(0) || '?'}
               </div>
               <span
                 className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-gray-800 ${
@@ -492,18 +506,20 @@ export function ChatCenter() {
             </div>
           )}
           <div className="min-w-0 flex-1">
-            {activeConv && <div className="flex items-center gap-2"> {/* Fix: Conditional rendering for activeConv */}
-              <h3 className="text-white font-bold truncate">{activeConv?.name}</h3>
-              {activeConv?.role && <RoleBadge role={activeConv.role.toLowerCase() as any} size="sm" />}
-              {activeConv?.type === 'direct' && (
-                <span className="flex items-center gap-1 text-xs text-amber-400/80 bg-amber-400/10 px-2 py-0.5 rounded-full">
-                  <Lock className="w-3 h-3" />
-                  Private
-                </span>
-              )}
-            </div>
+            {activeConv && (
+              <div className="flex items-center gap-2">
+                <h3 className="text-white font-bold truncate">{activeConv.name}</h3>
+                {activeConv.role && <RoleBadge role={activeConv.role.toLowerCase() as any} size="sm" />}
+                {activeConv.type === 'direct' && (
+                  <span className="flex items-center gap-1 text-xs text-amber-400/80 bg-amber-400/10 px-2 py-0.5 rounded-full">
+                    <Lock className="w-3 h-3" />
+                    Private
+                  </span>
+                )}
+              </div>
+            )}
             <p className="text-xs text-gray-400">
-              {activeConv.type === 'broadcast'
+              {activeConv?.type === 'broadcast'
                 ? `${conversations.length} members`
                 : 'Only you and the other person can see this conversation'}
             </p>
@@ -511,10 +527,9 @@ export function ChatCenter() {
         </header>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6" ref={messagesEndRef}> {/* Fix: Add ref here */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {groupedMessages.map((group) => (
             <div key={group.date}>
-              {/* Date Divider */}
               <div className="flex items-center gap-3 mb-4">
                 <div className="flex-1 h-px bg-gray-700" />
                 <span className="text-xs text-gray-500 font-medium">{group.date}</span>
@@ -532,15 +547,13 @@ export function ChatCenter() {
                       onMouseEnter={() => setHoveredMsgId(msg.id)}
                       onMouseLeave={() => setHoveredMsgId(null)}
                     >
-                      {/* Avatar */}
                       <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
                         {msg.sender.charAt(0)}
                       </div>
 
-                      {/* Bubble */}
                       <div className={`max-w-[65%] ${isMine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                         <div className={`flex items-center gap-2 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
-                          <span className="text-xs text-gray-400 font-medium">{msg.sender}</span> // msg.sender is already a string
+                          <span className="text-xs text-gray-400 font-medium">{msg.sender}</span>
                           <RoleBadge role={msg.role} size="sm" />
                         </div>
                         <div
@@ -550,7 +563,6 @@ export function ChatCenter() {
                               : 'bg-gray-700 text-gray-200 rounded-tl-sm'
                           }`}
                         >
-                          {/* Attachment */}
                           {msg.attachment && (
                             msg.attachment.type.startsWith('image/') ? (
                               <img
@@ -563,6 +575,8 @@ export function ChatCenter() {
                                 href={msg.attachment.url}
                                 download={msg.attachment.name}
                                 className={`flex items-center gap-3 px-4 py-3 border-b ${isMine ? 'border-white/20 hover:bg-white/10' : 'border-gray-600 hover:bg-gray-600'} transition-colors`}
+                                target="_blank"
+                                rel="noreferrer"
                               >
                                 <FileText className="w-8 h-8 flex-shrink-0 opacity-80" />
                                 <div className="flex-1 min-w-0">
@@ -573,12 +587,10 @@ export function ChatCenter() {
                               </a>
                             )
                           )}
-                          {/* Text */}
                           {msg.text && <p className="px-4 py-2.5">{msg.text}</p>}
                         </div>
                         <div className={`flex items-center gap-2 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
                           <span className="text-xs text-gray-500">{formatTime(msg.timestamp)}</span>
-                          {/* Delete button — only own messages, visible on hover */}
                           {isMine && isHovered && (
                             <button
                               onClick={() => handleDeleteMessage(msg.id, activeId)}
@@ -596,11 +608,12 @@ export function ChatCenter() {
               </div>
             </div>
           ))}
+          <div ref={messagesEndRef} />
 
-          {activeConv && activeConv.messages.length === 0 && ( // Fix: Optional chaining
-            <div className="flex flex-col items-center justify-center h-full text-center">
+          {activeConv && activeConv.messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-center py-12">
               <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mb-4">
-                {activeConv?.type === 'direct' ? (
+                {activeConv.type === 'direct' ? (
                   <Lock className="w-8 h-8 text-gray-500" />
                 ) : (
                   <Hash className="w-8 h-8 text-gray-500" />
@@ -608,7 +621,7 @@ export function ChatCenter() {
               </div>
               <p className="text-gray-400 font-medium">No messages yet</p>
               <p className="text-gray-500 text-sm mt-1">
-                {activeConv?.type === 'direct'
+                {activeConv.type === 'direct'
                   ? 'This is a private conversation — only you and the other person can see it'
                   : 'Be the first to say something'}
               </p>
@@ -618,7 +631,6 @@ export function ChatCenter() {
 
         {/* Input Area */}
         <div className="p-4 border-t border-gray-700 bg-gray-800 flex-shrink-0">
-          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -627,7 +639,6 @@ export function ChatCenter() {
             onChange={handleFileChange}
           />
 
-          {/* Attachment preview */}
           {attachment && (
             <div className="mb-3 flex items-center gap-2 bg-gray-700 border border-gray-600 rounded-xl px-3 py-2">
               {attachment.type.startsWith('image/') ? (
@@ -656,7 +667,6 @@ export function ChatCenter() {
           )}
 
           <div className="flex gap-2 items-end">
-            {/* Attach button */}
             <button
               onClick={() => fileInputRef.current?.click()}
               title="Attach image or document"
@@ -695,11 +705,9 @@ export function ChatCenter() {
         </div>
       </div>
 
-      {/* New DM Modal — Admin only */}
       {showNewDMModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl">
-            {/* Modal Header */}
             <div className="flex items-center justify-between p-5 border-b border-gray-700">
               <div>
                 <h3 className="text-white font-bold text-lg">New Direct Message</h3>
@@ -713,7 +721,6 @@ export function ChatCenter() {
               </button>
             </div>
 
-            {/* Staff List */}
             <div className="p-3 max-h-80 overflow-y-auto">
               {availableStaff.length === 0 ? (
                 <div className="py-8 text-center">
@@ -730,7 +737,7 @@ export function ChatCenter() {
                     onClick={() => handleStartDM(staff)}
                     className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-700 transition-colors text-left"
                   >
-                    <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold flex-shrink-0"> {/* Fix: Missing closing tag for this div */}
+                    <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold flex-shrink-0">
                       {staff.name.charAt(0)}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -764,7 +771,6 @@ function ConversationItem({ conv, isActive, onClick, isPrivate }: ConversationIt
         isActive ? 'bg-primary/10 border-r-2 border-primary' : 'hover:bg-gray-700/50'
       }`}
     >
-      {/* Avatar / Icon */}
       {conv.type === 'broadcast' ? (
         <div className="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
           <Hash className="w-4 h-4 text-primary" />
@@ -782,7 +788,6 @@ function ConversationItem({ conv, isActive, onClick, isPrivate }: ConversationIt
         </div>
       )}
 
-      {/* Text */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-0.5">
           <span

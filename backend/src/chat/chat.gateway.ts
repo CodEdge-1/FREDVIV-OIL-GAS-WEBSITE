@@ -12,7 +12,16 @@ import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
 
 @WebSocketGateway({
-  cors: { origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true },
+  cors: {
+    origin: [
+      process.env.FRONTEND_URL || 'http://localhost:3000',
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:5173',
+    ],
+    credentials: true,
+  },
   namespace: '/chat',
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -38,6 +47,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         role: payload.role,
       });
       client.data.userId = payload.sub;
+      
+      // Auto-join the user to their own personal room and the broadcast room
+      await client.join(`user-${payload.sub}`);
+      await client.join('broadcast');
     } catch {
       client.disconnect();
     }
@@ -57,12 +70,48 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('send-message')
   async handleMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; content: string },
+    @MessageBody() data: { 
+      roomId: string; 
+      content: string; 
+      attachment?: { url: string; name: string; type: string; size: number } 
+    },
   ) {
     const userId = client.data.userId;
     if (!userId) return;
 
-    const message = await this.chatService.saveMessage(userId, data.roomId, data.content);
-    this.server.to(data.roomId).emit('new-message', message);
+    const message = await this.chatService.saveMessage(userId, data.roomId, data.content, data.attachment);
+    
+    if (data.roomId === 'broadcast') {
+      this.server.to('broadcast').emit('new-message', message);
+    } else if (data.roomId.startsWith('dm-')) {
+      const staffId = data.roomId.replace('dm-', '');
+      // Route message to staff's personal room and all admins' personal rooms
+      this.server.to(`user-${staffId}`).emit('new-message', message);
+      
+      const adminIds = await this.chatService.getAdminUserIds();
+      for (const adminId of adminIds) {
+        if (adminId !== staffId) {
+          this.server.to(`user-${adminId}`).emit('new-message', message);
+        }
+      }
+    }
+  }
+
+  broadcastMessageDeletion(roomId: string, messageId: string, senderId: string) {
+    if (roomId === 'broadcast') {
+      this.server.to('broadcast').emit('message-deleted', { roomId, messageId });
+    } else if (roomId.startsWith('dm-')) {
+      const recipientId = roomId.replace('dm-', '');
+      this.server.to(`user-${senderId}`).emit('message-deleted', { roomId, messageId });
+      this.server.to(`user-${recipientId}`).emit('message-deleted', { roomId, messageId });
+      
+      this.chatService.getAdminUserIds().then(adminIds => {
+        for (const adminId of adminIds) {
+          if (adminId !== senderId && adminId !== recipientId) {
+            this.server.to(`user-${adminId}`).emit('message-deleted', { roomId, messageId });
+          }
+        }
+      });
+    }
   }
 }

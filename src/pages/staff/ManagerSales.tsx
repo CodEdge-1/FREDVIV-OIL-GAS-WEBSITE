@@ -5,8 +5,16 @@ import { StatusBadge } from '../../components/dashboard/StatusBadge';
 import { logout, getSession, StaffAccount } from '../../lib/auth';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
-import { type SalesReport } from '../../lib/store'; // Keep type for now, will replace with backend type
-import { Fuel, Droplet, Lock, Save, Calculator, TrendingUp } from 'lucide-react';
+import { type SalesReport } from '../../lib/store';
+import { Fuel, Droplet, Lock, Save, Calculator, TrendingUp, AlertCircle } from 'lucide-react';
+
+const getLocalDateString = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export function ManagerSales() {
   const navigate = useNavigate();
@@ -15,19 +23,34 @@ export function ManagerSales() {
   const [account, setAccount] = useState<StaffAccount | null>(null);
   const [prices, setPrices] = useState({ pms: 0, ago: 0 });
   const [existingReport, setExistingReport] = useState<SalesReport | null>(null);
+  const [history, setHistory] = useState<SalesReport[]>([]);
+
+  const today = getLocalDateString();
+
+  const fetchHistory = async () => {
+    if (!session?.id) return;
+    try {
+      const data = await api.get(`/sales-reports?managerId=${session.id}`);
+      setHistory(data);
+    } catch (error) {
+      console.error('Failed to fetch sales history:', error);
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
       if (!session?.id) return;
       try {
+        const localToday = getLocalDateString();
         const [userData, priceData, salesReportData] = await Promise.all([
           api.get(`/users/${session.id}`),
-          api.get('/prices'),
-          api.get(`/sales-reports/today/${session.id}`), // Assuming an endpoint for today's sales report for a manager
+          api.get('/fuel-prices/current'),
+          api.get(`/sales-reports/today/${session.id}?date=${localToday}`),
         ]);
         setAccount(userData);
         setPrices(priceData);
         setExistingReport(salesReportData);
+        fetchHistory();
       } catch (error) {
         console.error('Failed to fetch sales data:', error);
         toast.error('Failed to load sales data.');
@@ -42,8 +65,6 @@ export function ManagerSales() {
   const pmsPrice = prices.pms;
   const agoPrice = prices.ago;
 
-  const today = new Date().toISOString().split('T')[0];
-
   const [isSubmitted, setIsSubmitted] = useState(!!existingReport);
   const [openingPMS, setOpeningPMS] = useState(String(existingReport?.openingPMS ?? ''));
   const [openingAGO, setOpeningAGO] = useState(String(existingReport?.openingAGO ?? ''));
@@ -51,10 +72,28 @@ export function ManagerSales() {
   const [soldAGO, setSoldAGO] = useState(String(existingReport?.soldAGO ?? ''));
   const [remainingPMS, setRemainingPMS] = useState(String(existingReport?.remainingPMS ?? ''));
   const [remainingAGO, setRemainingAGO] = useState(String(existingReport?.remainingAGO ?? ''));
-  const [overage, setOverage] = useState(String(existingReport?.overage ?? '0'));
+  const [overagePMS, setOveragePMS] = useState(String(existingReport?.overagePMS ?? '0'));
+  const [overageAGO, setOverageAGO] = useState(String(existingReport?.overageAGO ?? '0'));
   const [cardPayments, setCardPayments] = useState(String(existingReport?.cardPayments ?? ''));
   const [bankTransfers, setBankTransfers] = useState(String(existingReport?.bankTransfers ?? ''));
   const [cashPayments, setCashPayments] = useState(String(existingReport?.cashPayments ?? ''));
+
+  useEffect(() => {
+    if (existingReport) {
+      setIsSubmitted(true);
+      setOpeningPMS(String(existingReport.openingPMS ?? ''));
+      setOpeningAGO(String(existingReport.openingAGO ?? ''));
+      setSoldPMS(String(existingReport.soldPMS ?? ''));
+      setSoldAGO(String(existingReport.soldAGO ?? ''));
+      setRemainingPMS(String(existingReport.remainingPMS ?? ''));
+      setRemainingAGO(String(existingReport.remainingAGO ?? ''));
+      setOveragePMS(String(existingReport.overagePMS ?? '0'));
+      setOverageAGO(String(existingReport.overageAGO ?? '0'));
+      setCardPayments(String(existingReport.cardPayments ?? ''));
+      setBankTransfers(String(existingReport.bankTransfers ?? ''));
+      setCashPayments(String(existingReport.cashPayments ?? ''));
+    }
+  }, [existingReport]);
 
   const totalPMSSales = Number(soldPMS) * pmsPrice;
   const totalAGOSales = Number(soldAGO) * agoPrice;
@@ -63,35 +102,36 @@ export function ManagerSales() {
 
   const handleSubmit = async () => {
     if (!session) return;
+    if (!account?.branchId) {
+      toast.error('You must be assigned to a branch to submit sales reports.');
+      return;
+    }
 
     const reportData = {
-      managerId: session.id,
-      branch: branchName,
-      location: branchLocation,
+      branchId: account.branchId,
       date: today,
       openingPMS: Number(openingPMS),
       soldPMS: Number(soldPMS),
       remainingPMS: Number(remainingPMS),
-      openingAGO: Number(openingAGO), // Assuming these are part of the sales report
-      soldAGO: Number(soldAGO), // Assuming these are part of the sales report
-      remainingAGO: Number(remainingAGO), // Assuming these are part of the sales report
-      overage: Number(overage),
-      pmsPrice,
-      agoPrice,
-      pmsSales: totalPMSSales,
-      agoSales: totalAGOSales,
-      totalSales: totalDailySales,
+      openingAGO: Number(openingAGO),
+      soldAGO: Number(soldAGO),
+      remainingAGO: Number(remainingAGO),
+      overage: Number(overagePMS) + Number(overageAGO),
+      overagePMS: Number(overagePMS),
+      overageAGO: Number(overageAGO),
       cardPayments: Number(cardPayments),
       bankTransfers: Number(bankTransfers),
       cashPayments: Number(cashPayments),
-      totalPayments,
     };
 
     try {
-      await api.post('/sales-reports', reportData); // Assuming an endpoint to submit sales reports
+      await api.post('/sales-reports', reportData);
       toast.success('Sales report submitted successfully!');
       setIsSubmitted(true);
-      // Send notification to admin via API
+      const localToday = getLocalDateString();
+      const updatedReport = await api.get(`/sales-reports/today/${session.id}?date=${localToday}`);
+      setExistingReport(updatedReport);
+      fetchHistory();
       await api.post('/notifications', { userId: 'admin', title: 'Sales Report Submitted', body: `${session.name} (${branchName}) submitted their daily sales report — ₦${totalDailySales.toLocaleString()} total.` });
     } catch (error) {
       console.error('Failed to submit sales report:', error);
@@ -132,7 +172,7 @@ export function ManagerSales() {
               </div>
               {isSubmitted && (
                 <div className="flex items-center gap-2">
-                  <StatusBadge status="APPROVED" /> {/* Assuming 'submitted' maps to 'APPROVED' or a new status */}
+                  <StatusBadge status={existingReport?.status || 'PENDING'} />
                   <Lock className="w-5 h-5 text-gray-400" />
                 </div>
               )}
@@ -159,6 +199,11 @@ export function ManagerSales() {
                   <input type="number" value={remainingPMS} onChange={(e) => setRemainingPMS(e.target.value)} disabled={isSubmitted}
                     className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary" placeholder="0" />
                 </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">PMS Overage (if any)</label>
+                  <input type="number" value={overagePMS} onChange={(e) => setOveragePMS(e.target.value)} disabled={isSubmitted}
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary" placeholder="0" />
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -181,13 +226,12 @@ export function ManagerSales() {
                   <input type="number" value={remainingAGO} onChange={(e) => setRemainingAGO(e.target.value)} disabled={isSubmitted}
                     className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary" placeholder="0" />
                 </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">AGO Overage (if any)</label>
+                  <input type="number" value={overageAGO} onChange={(e) => setOverageAGO(e.target.value)} disabled={isSubmitted}
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary" placeholder="0" />
+                </div>
               </div>
-            </div>
-
-            <div className="mb-6">
-              <label className="block text-sm text-gray-300 mb-2">Overage (if any)</label>
-              <input type="number" value={overage} onChange={(e) => setOverage(e.target.value)} disabled={isSubmitted}
-                className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary" placeholder="0" />
             </div>
 
             <div className="bg-primary/10 border border-primary/20 rounded-lg p-6">
@@ -255,6 +299,69 @@ export function ManagerSales() {
               </p>
             </div>
           )}
+
+          {/* Previous Reports History */}
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-primary" />
+              Previous Sales Reports
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-700/50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">PMS Sold</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">AGO Sold</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Total Sales</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Total Payments</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-700">
+                  {history.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-10 text-center text-gray-500 text-sm">
+                        No historical reports found.
+                      </td>
+                    </tr>
+                  ) : (
+                    history.map((report) => (
+                      <tr key={report.id} className="hover:bg-gray-700/30 transition-colors text-sm">
+                        <td className="px-6 py-4 text-white font-medium">
+                          {report.date.includes('-') ? (
+                            (() => {
+                              const parts = report.date.split('-');
+                              if (parts.length === 3) {
+                                const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                                return d.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+                              }
+                              return report.date;
+                            })()
+                          ) : report.date}
+                        </td>
+                        <td className="px-6 py-4 text-gray-300">
+                          {report.soldPMS?.toLocaleString()} L
+                        </td>
+                        <td className="px-6 py-4 text-gray-300">
+                          {report.soldAGO?.toLocaleString()} L
+                        </td>
+                        <td className="px-6 py-4 text-white font-semibold">
+                          ₦{report.totalSales?.toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 text-gray-300">
+                          ₦{report.totalPayments?.toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4">
+                          <StatusBadge status={report.status} />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </main>
       </div>
     </div>

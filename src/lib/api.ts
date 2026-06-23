@@ -1,6 +1,6 @@
 import { getAuthToken } from './auth'; // Import getAuthToken
 
-const BASE_URL = 'http://localhost:3001'; // Your NestJS backend
+const BASE_URL = 'http://localhost:3001/api'; // Your NestJS backend
 
 async function request(endpoint: string, options: RequestInit = {}) {
   const token = getAuthToken(); // Get token directly
@@ -17,7 +17,8 @@ async function request(endpoint: string, options: RequestInit = {}) {
     throw new Error(error.message || 'API request failed');
   }
 
-  return response.json();
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 export const api = {

@@ -56,7 +56,10 @@ export function AuditorReports() {
     try {
       const data = await api.get('/sales-reports/audit'); // Assuming an endpoint for audit reports
       // Map backend status to frontend AuditStatus if necessary
-      setReports(data.map((r: any) => ({ ...r, auditStatus: r.auditStatus || 'PENDING' }))); // Update default status
+      setReports(data.map((r: any) => ({
+        ...r,
+        auditStatus: r.status === 'SUBMITTED' ? 'PENDING' : r.status
+      }))); // Update default status
     } catch (error) {
       console.error('Failed to fetch audit reports:', error);
       toast.error('Failed to load audit reports.');
@@ -69,7 +72,7 @@ export function AuditorReports() {
 
   const handleMarkAudited = async (id: string) => {
     try {
-      await api.patch(`/sales-reports/${id}/audit`, { auditStatus: 'APPROVED' }); // Update status to APPROVED
+      await api.patch(`/sales-reports/${id}/approve`); // Update status to APPROVED via backend approve endpoint
       fetchReports(); // Re-fetch to update UI
     } catch (error) {
       toast.error('Failed to mark report as audited.');
@@ -79,7 +82,7 @@ export function AuditorReports() {
   const handleFlag = async () => {
     if (!flagModal) return;
     try {
-      await api.patch(`/sales-reports/${flagModal.id}/audit`, { auditStatus: 'REJECTED', auditNote: flagNote }); // Update status to REJECTED
+      await api.patch(`/sales-reports/${flagModal.id}/reject`, { reason: flagNote }); // Update status to REJECTED (assuming reject endpoint exists or needs to be added)
       toast.success('Report flagged successfully.');
       setFlagModal(null);
       setFlagNote('');

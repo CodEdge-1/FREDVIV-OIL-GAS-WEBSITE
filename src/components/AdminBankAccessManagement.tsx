@@ -27,23 +27,9 @@ export function AdminBankAccessManagement() {
   }, []);
 
   const handleApproveRequest = async (request: BankAccessRequest) => {
-    const creds = credentials[request.id];
-    if (!creds?.username || !creds?.password) {
-      toast.error('Please provide both username and password');
-      return;
-    }
-
     try {
-      await api.patch(`/bank-access-requests/${request.id}/approve`, {
-        username: creds.username,
-        password: creds.password
-      });
+      await api.patch(`/bank-access-requests/${request.id}/approve`, {});
 
-      setCredentials((prev) => {
-        const next = { ...prev };
-        delete next[request.id];
-        return next;
-      });
       setExpandedId(null);
       refreshRequests();
       toast.success(`Access approved for ${request.requester}`);
@@ -128,63 +114,14 @@ export function AdminBankAccessManagement() {
                     <div className="bg-blue-500/10 border border-blue-500/30 rounded p-3 flex gap-2">
                       <AlertCircle className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
                       <p className="text-sm text-blue-200">
-                        Provide the login credentials for {request.bankName}. These will be shown to{' '}
-                        <span className="font-semibold">{request.requester}</span> to use for this session.
+                        Approve access for {request.requester} to log in directly to {request.bankName}.
                       </p>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                          Username / Customer ID
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="e.g., FREDVIV123 or username@bank"
-                          value={
-                            credentials[request.id]?.username || ''
-                          }
-                          onChange={(e) =>
-                            setCredentials((prev) => ({
-                              ...prev,
-                              [request.id]: {
-                                ...(prev[request.id] || { password: '' }),
-                                username: e.target.value,
-                              },
-                            }))
-                          }
-                          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                          Password
-                        </label>
-                        <input
-                          type="password"
-                          placeholder="Bank portal password"
-                          value={
-                            credentials[request.id]?.password || ''
-                          }
-                          onChange={(e) =>
-                            setCredentials((prev) => ({
-                              ...prev,
-                              [request.id]: {
-                                ...(prev[request.id] || { username: '' }),
-                                password: e.target.value,
-                              },
-                            }))
-                          }
-                          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary"
-                        />
-                      </div>
                     </div>
 
                     <div className="bg-gray-700/50 border border-gray-600 rounded p-3 text-xs text-gray-400 space-y-1">
                       <p>📋 <span className="font-semibold">Access Duration:</span> 24 hours from approval</p>
-                      <p>🔐 <span className="font-semibold">Security:</span> Access shown in private iframe</p>
-                      <p>📝 <span className="font-semibold">Note:</span> No browser history will be kept</p>
+                      <p>🔐 <span className="font-semibold">Security:</span> Staff will authenticate directly with the bank</p>
+                      <p>📝 <span className="font-semibold">Note:</span> No credentials will be stored or handled by the system</p>
                     </div>
 
                     <div className="flex gap-3">

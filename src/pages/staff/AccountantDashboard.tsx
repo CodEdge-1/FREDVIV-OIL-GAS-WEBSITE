@@ -23,17 +23,64 @@ export function AccountantDashboard() {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [balanceVisible, setBalanceVisible] = useState(false);
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL_TIME');
+  const [unlockedPeriod, setUnlockedPeriod] = useState<string>('ALL_TIME');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const accountBalance = allReports.reduce((sum, r) => sum + r.totalSales, 0);
+  const getLocalDateString = (d = new Date()) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getFilteredBalance = () => {
+    const todayStr = getLocalDateString();
+    const monthStr = todayStr.substring(0, 7); // YYYY-MM
+    const yearStr = todayStr.substring(0, 4); // YYYY
+
+    const filtered = allReports.filter(r => {
+      if (unlockedPeriod === 'DAILY') {
+        return r.date === todayStr;
+      }
+      if (unlockedPeriod === 'WEEKLY') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const day = today.getDay();
+        const startOfWeek = new Date(today);
+        const diffToMonday = day === 0 ? -6 : 1 - day;
+        startOfWeek.setDate(today.getDate() + diffToMonday);
+        
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+        endOfWeek.setHours(23, 59, 59, 999);
+
+        const parts = r.date.split('-');
+        if (parts.length !== 3) return false;
+        const targetDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+
+        return targetDate >= startOfWeek && targetDate <= endOfWeek;
+      }
+      if (unlockedPeriod === 'MONTHLY') {
+        return r.date.startsWith(monthStr);
+      }
+      if (unlockedPeriod === 'YEARLY') {
+        return r.date.startsWith(yearStr);
+      }
+      return true; // ALL_TIME
+    });
+    return filtered.reduce((sum, r) => sum + r.totalSales, 0);
+  };
+
+  const accountBalance = getFilteredBalance();
 
   const fetchDashboardData = async () => {
     if (!session?.id) return;
     try {
       const [reportsData, pendingReqData, approvedReqData] = await Promise.all([
         api.get('/sales-reports'), // Assuming endpoint for all sales reports
-        api.get(`/balance-requests/pending/${session.id}`), // Assuming endpoint for user's pending balance request
-        api.get(`/balance-requests/approved/${session.id}`), // Assuming endpoint for user's approved balance request
+        api.get('/balance-requests/my/pending'),
+        api.get('/balance-requests/my/approved'),
       ]);
       setAllReports(reportsData);
       setPendingRequest(pendingReqData);
@@ -55,7 +102,7 @@ export function AccountantDashboard() {
     if (pendingRequest) {
       pollRef.current = setInterval(() => {
         // Poll API for approved request status
-        api.get(`/balance-requests/approved/${session.id}`).then(approved => {
+        api.get('/balance-requests/my/approved').then(approved => {
           if (approved) {
             setPendingRequest(null);
             setApprovedRequest(approved);
@@ -73,17 +120,26 @@ export function AccountantDashboard() {
     if (!session) return;
     try {
       const newRequest = await api.post('/balance-requests', {
-        requesterId: session.id,
-        requester: session.name,
-        role: 'ACCOUNTANT', // Ensure role matches Prisma enum
-        status: 'PENDING', // Ensure status matches Prisma enum
+        role: 'ACCOUNTANT',
+        period: selectedPeriod,
       });
       toast.success('Balance request submitted to admin.');
       setPendingRequest(newRequest);
-      // Fix: Let the backend handle routing notifications to all admins
-      await api.post('/notifications/admin-alert', {
+      // Send notification to admin via API
+      await api.post('/notifications', {
+        userId: 'admin',
         title: 'Balance Request Submitted',
-        body: `${session.name} (Accountant) has requested access to view the account balance.`,
+        body: `${session?.name} (Accountant) has requested access to view the account balance (${
+          selectedPeriod === 'DAILY'
+            ? 'Today'
+            : selectedPeriod === 'WEEKLY'
+            ? 'This Week'
+            : selectedPeriod === 'MONTHLY'
+            ? 'This Month'
+            : selectedPeriod === 'YEARLY'
+            ? 'This Year'
+            : 'All Time'
+        }).`,
       });
     } catch (error) {
       console.error('Failed to submit balance request:', error);
@@ -97,6 +153,7 @@ export function AccountantDashboard() {
       // Use the new backend validation endpoint
       await api.post(`/balance-requests/${approvedRequest.id}/validate`, { pin: pinInput });
       
+      setUnlockedPeriod(approvedRequest.period || 'ALL_TIME');
       setShowPinEntry(false);
       setPinInput('');
       setPinError('');
@@ -133,7 +190,21 @@ export function AccountantDashboard() {
           <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-gray-400 text-sm mb-1">Account Balance</p>
+                <p className="text-gray-400 text-sm mb-1">
+                  {balanceVisible
+                    ? `Account Balance (${
+                        unlockedPeriod === 'DAILY'
+                          ? 'Today'
+                          : unlockedPeriod === 'WEEKLY'
+                          ? 'This Week'
+                          : unlockedPeriod === 'MONTHLY'
+                          ? 'This Month'
+                          : unlockedPeriod === 'YEARLY'
+                          ? 'This Year'
+                          : 'All Time'
+                      })`
+                    : 'Account Balance'}
+                </p>
                 {balanceVisible ? (
                   <p className="text-4xl font-bold text-white">{formatCurrency(accountBalance)}</p>
                 ) : (
@@ -145,13 +216,26 @@ export function AccountantDashboard() {
               </div>
 
               {!balanceVisible && !pendingRequest && !approvedRequest && (
-                <button
-                  onClick={handleRequestBalance}
-                  className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2"
-                >
-                  <Eye className="w-5 h-5" />
-                  Request Balance
-                </button>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedPeriod}
+                    onChange={(e) => setSelectedPeriod(e.target.value)}
+                    className="bg-gray-700 border border-gray-600 text-white rounded-lg px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent cursor-pointer"
+                  >
+                    <option value="ALL_TIME">All Time</option>
+                    <option value="DAILY">Today</option>
+                    <option value="WEEKLY">This Week</option>
+                    <option value="MONTHLY">This Month</option>
+                    <option value="YEARLY">This Year</option>
+                  </select>
+                  <button
+                    onClick={handleRequestBalance}
+                    className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2"
+                  >
+                    <Eye className="w-5 h-5" />
+                    Request Balance
+                  </button>
+                </div>
               )}
 
               {pendingRequest && !approvedRequest && (

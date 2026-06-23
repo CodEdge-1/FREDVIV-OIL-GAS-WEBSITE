@@ -9,7 +9,17 @@ import {
 } from '../../lib/store'; // Import BalanceRequest type
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
-import { Check, Clock, Inbox, KeyRound, RefreshCw } from 'lucide-react';
+import { Check, Clock, Inbox, KeyRound, RefreshCw, X } from 'lucide-react';
+
+const getPeriodLabel = (period?: string) => {
+  switch (period) {
+    case 'DAILY': return 'Today';
+    case 'MONTHLY': return 'This Month';
+    case 'YEARLY': return 'This Year';
+    case 'ALL_TIME':
+    default: return 'All Time';
+  }
+};
 
 export function BalanceRequests() {
   const navigate = useNavigate();
@@ -81,6 +91,31 @@ export function BalanceRequests() {
     } catch (error) {
       console.error('Failed to approve balance request:', error);
       toast.error('Failed to approve balance request.');
+    }
+  };
+
+  const handleReject = async (id: string, requesterId: string, requester: string) => {
+    try {
+      await api.patch(`/balance-requests/${id}/reject`, {});
+      // Send notification via API
+      await api.post(`/notifications`, {
+        userId: requesterId,
+        title: 'Balance Request Rejected',
+        body: 'Your request to view the account balance has been rejected by the admin.',
+      });
+      // Add activity log via API
+      await api.post(`/activity-logs`, {
+        userId: session?.id, // Admin's ID
+        action: `Balance request rejected — ${requester}`,
+        type: 'balance',
+        details: `Request ID: ${id}`,
+      });
+
+      toast.success('Balance request rejected.');
+      fetchRequests(); // Reload requests
+    } catch (error) {
+      console.error('Failed to reject balance request:', error);
+      toast.error('Failed to reject balance request.');
     }
   };
 
@@ -159,18 +194,30 @@ export function BalanceRequests() {
                         <div className="flex items-center gap-2 mb-1">
                           <p className="text-white font-medium">{request.requester}</p>
                           <RoleBadge role={request.role} size="sm" />
+                          <span className="text-xs px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-full font-medium">
+                            {getPeriodLabel(request.period)}
+                          </span>
                         </div>
                         <p className="text-gray-400 text-sm">Requested at {request.requestTime}</p>
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => openPinModal(request.id)}
-                      className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2"
-                    >
-                      <KeyRound className="w-5 h-5" />
-                      Approve &amp; Set PIN
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleReject(request.id, request.requesterId, request.requester)}
+                        className="px-4 py-3 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded-lg transition-colors flex items-center gap-2"
+                      >
+                        <X className="w-5 h-5" />
+                        Reject
+                      </button>
+                      <button
+                        onClick={() => openPinModal(request.id)}
+                        className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2"
+                      >
+                        <KeyRound className="w-5 h-5" />
+                        Approve &amp; Set PIN
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -190,6 +237,7 @@ export function BalanceRequests() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Request ID</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Requester</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Role</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Period</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Request Time</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Approved Time</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
@@ -198,7 +246,7 @@ export function BalanceRequests() {
                 <tbody className="divide-y divide-gray-700">
                   {requests.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-16 text-center">
+                      <td colSpan={7} className="px-6 py-16 text-center">
                         <div className="flex flex-col items-center gap-3">
                           <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center">
                             <Inbox className="w-6 h-6 text-gray-500" />
@@ -219,6 +267,9 @@ export function BalanceRequests() {
                         </td>
                         <td className="px-6 py-4">
                           <RoleBadge role={request.role} size="sm" />
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-gray-300 text-sm font-medium">{getPeriodLabel(request.period)}</span>
                         </td>
                         <td className="px-6 py-4">
                           <span className="text-gray-400 text-sm">{request.requestTime}</span>

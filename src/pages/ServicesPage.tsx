@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import { Fuel, Droplet, Flame, Truck, Building2, ShieldCheck } from 'lucide-react';
-import { ImageWithFallback } from '../components/figma/ImageWithFallback';
+import { ImageWithFallback } from '../components/ui/ImageWithFallback';
 
 export function ServicesPage() {
   const services = [

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { FuelPricesService, SetPriceDto } from './fuel-prices.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -25,5 +25,12 @@ export class FuelPricesController {
   @Post()
   setPrice(@Body() dto: SetPriceDto, @CurrentUser() user: any) {
     return this.fuelPricesService.setPrice(dto, user.id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  @Delete('history/:id')
+  deleteHistoryRecord(@Param('id') id: string) {
+    return this.fuelPricesService.deleteHistoryRecord(id);
   }
 }

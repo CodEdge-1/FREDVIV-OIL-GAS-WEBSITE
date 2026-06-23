@@ -36,17 +36,66 @@ export function AuditorDashboard() {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [balanceVisible, setBalanceVisible] = useState(false);
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL_TIME');
+  const [unlockedPeriod, setUnlockedPeriod] = useState<string>('ALL_TIME');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const today = new Date().toISOString().split('T')[0];
-  const todayReports = allReports.filter((r) => r.date === today);
-  const discrepancies = allReports.filter((r) => r.totalSales !== r.totalPayments);
+  const getLocalDateString = (d = new Date()) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const today = getLocalDateString();
+  const pendingReports = allReports.filter((r) => r.status === 'PENDING' || r.status === 'SUBMITTED');
+  const auditedToday = allReports.filter((r) => (r.status === 'APPROVED' || r.status === 'REJECTED') && r.date === today);
+  const discrepancies = allReports.filter((r) => (r.status === 'PENDING' || r.status === 'SUBMITTED') && r.totalSales !== r.totalPayments);
   const branches = new Set(users.map((a) => a.branch).filter(Boolean)).size;
-  const totalRevenue = allReports.reduce((sum, r) => sum + r.totalSales, 0);
+
+  const getFilteredBalance = () => {
+    const todayStr = today;
+    const monthStr = todayStr.substring(0, 7); // YYYY-MM
+    const yearStr = todayStr.substring(0, 4); // YYYY
+
+    const filtered = allReports.filter(r => {
+      if (unlockedPeriod === 'DAILY') {
+        return r.date === todayStr;
+      }
+      if (unlockedPeriod === 'WEEKLY') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const day = today.getDay();
+        const startOfWeek = new Date(today);
+        const diffToMonday = day === 0 ? -6 : 1 - day;
+        startOfWeek.setDate(today.getDate() + diffToMonday);
+        
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+        endOfWeek.setHours(23, 59, 59, 999);
+
+        const parts = r.date.split('-');
+        if (parts.length !== 3) return false;
+        const targetDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+
+        return targetDate >= startOfWeek && targetDate <= endOfWeek;
+      }
+      if (unlockedPeriod === 'MONTHLY') {
+        return r.date.startsWith(monthStr);
+      }
+      if (unlockedPeriod === 'YEARLY') {
+        return r.date.startsWith(yearStr);
+      }
+      return true; // ALL_TIME
+    });
+    return filtered.reduce((sum, r) => sum + r.totalSales, 0);
+  };
+
+  const totalRevenue = getFilteredBalance();
 
   const stats = [
-    { label: 'Pending Review', value: allReports.length - todayReports.length, color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20', icon: ClipboardCheck },
-    { label: 'Audited Today', value: todayReports.length, color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/20', icon: CheckCircle },
+    { label: 'Pending Review', value: pendingReports.length, color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20', icon: ClipboardCheck },
+    { label: 'Audited Today', value: auditedToday.length, color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/20', icon: CheckCircle },
     { label: 'Discrepancies Found', value: discrepancies.length, color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20', icon: AlertTriangle },
     { label: 'Branches Monitored', value: branches, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20', icon: ShieldCheck },
   ];
@@ -55,10 +104,10 @@ export function AuditorDashboard() {
     if (!session?.id) return;
     try {
       const [reportsData, usersData, pendingReqData, approvedReqData] = await Promise.all([
-        api.get('/sales-reports'), // Assuming endpoint for all sales reports
-        api.get('/users'), // Assuming endpoint for all users
-        api.get(`/balance-requests/pending/${session.id}`), // Assuming endpoint for user's pending balance request
-        api.get(`/balance-requests/approved/${session.id}`), // Assuming endpoint for user's approved balance request
+        api.get('/sales-reports'),
+        api.get('/users'),
+        api.get(`/balance-requests/my/pending`),
+        api.get(`/balance-requests/my/approved`),
       ]);
       setAllReports(reportsData);
       setUsers(usersData);
@@ -81,7 +130,7 @@ export function AuditorDashboard() {
     if (pendingRequest) {
       pollRef.current = setInterval(() => {
         // Poll API for approved request status
-        api.get(`/balance-requests/approved/${session.id}`).then(approved => {
+        api.get('/balance-requests/my/approved').then(approved => {
           if (approved) {
             setPendingRequest(null);
             setApprovedRequest(approved);
@@ -99,10 +148,8 @@ export function AuditorDashboard() {
     if (!session) return;
     try {
       const newRequest = await api.post('/balance-requests', {
-        requesterId: session.id,
-        requester: session.name,
-        role: 'AUDITOR', // Ensure role matches Prisma enum
-        status: 'PENDING', // Ensure status matches Prisma enum
+        role: 'AUDITOR',
+        period: selectedPeriod,
       });
       toast.success('Balance request submitted to admin.');
       setPendingRequest(newRequest);
@@ -110,7 +157,17 @@ export function AuditorDashboard() {
       await api.post('/notifications', {
         userId: 'admin', // Assuming 'admin' is the ID for the admin user
         title: 'Balance Request Submitted',
-        body: `${session?.name} (Auditor) has requested access to view the account balance.`,
+        body: `${session?.name} (Auditor) has requested access to view the account balance (${
+          selectedPeriod === 'DAILY'
+            ? 'Today'
+            : selectedPeriod === 'WEEKLY'
+            ? 'This Week'
+            : selectedPeriod === 'MONTHLY'
+            ? 'This Month'
+            : selectedPeriod === 'YEARLY'
+            ? 'This Year'
+            : 'All Time'
+        }).`,
       });
     } catch (error) {
       console.error('Failed to submit balance request:', error);
@@ -124,6 +181,7 @@ export function AuditorDashboard() {
       // Use the new backend validation endpoint
       await api.post(`/balance-requests/${approvedRequest.id}/validate`, { pin: pinInput });
       
+      setUnlockedPeriod(approvedRequest.period || 'ALL_TIME');
       setShowPinEntry(false);
       setPinInput('');
       setPinError('');
@@ -197,6 +255,11 @@ export function AuditorDashboard() {
                           {variance > 0 ? '-' : '+'}{formatCurrency(Math.abs(variance))}
                         </span>
                       </p>
+                      <div className="flex gap-4 text-[11px] text-gray-500 mt-1 border-t border-gray-700/40 pt-1">
+                        <span>Card: {formatCurrency(r.cardPayments)}</span>
+                        <span>Transfer: {formatCurrency(r.bankTransfers)}</span>
+                        <span>Cash: {formatCurrency(r.cashPayments)}</span>
+                      </div>
                     </div>
                   );
                 })}
@@ -208,7 +271,21 @@ export function AuditorDashboard() {
           <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-gray-400 text-sm mb-1">Total Revenue (All Time)</p>
+                <p className="text-gray-400 text-sm mb-1">
+                  {balanceVisible
+                    ? `Total Revenue (${
+                        unlockedPeriod === 'DAILY'
+                          ? 'Today'
+                          : unlockedPeriod === 'WEEKLY'
+                          ? 'This Week'
+                          : unlockedPeriod === 'MONTHLY'
+                          ? 'This Month'
+                          : unlockedPeriod === 'YEARLY'
+                          ? 'This Year'
+                          : 'All Time'
+                      })`
+                    : 'Total Revenue'}
+                </p>
                 {balanceVisible ? (
                   <p className="text-4xl font-bold text-white">{formatCurrency(totalRevenue)}</p>
                 ) : (
@@ -220,13 +297,26 @@ export function AuditorDashboard() {
               </div>
 
               {!balanceVisible && !pendingRequest && !approvedRequest && (
-                <button
-                  onClick={handleRequestBalance}
-                  className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2"
-                >
-                  <Eye className="w-5 h-5" />
-                  View Balance
-                </button>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedPeriod}
+                    onChange={(e) => setSelectedPeriod(e.target.value)}
+                    className="bg-gray-700 border border-gray-600 text-white rounded-lg px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent cursor-pointer"
+                  >
+                    <option value="ALL_TIME">All Time</option>
+                    <option value="DAILY">Today</option>
+                    <option value="WEEKLY">This Week</option>
+                    <option value="MONTHLY">This Month</option>
+                    <option value="YEARLY">This Year</option>
+                  </select>
+                  <button
+                    onClick={handleRequestBalance}
+                    className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2"
+                  >
+                    <Eye className="w-5 h-5" />
+                    View Balance
+                  </button>
+                </div>
               )}
 
               {pendingRequest && !approvedRequest && (

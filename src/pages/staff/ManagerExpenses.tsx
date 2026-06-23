@@ -36,7 +36,7 @@ export function ManagerExpenses() {
   const fetchExpenses = async () => {
     if (!session?.id) return;
     try {
-      const data = await api.get(`/expenses/manager/${session.id}`); // Assuming an endpoint for manager's expenses
+      const data = await api.get(`/expenses?managerId=${session.id}`); // Fetch manager's expenses
       setExpenses(data);
     } catch (error) {
       console.error('Failed to fetch expenses:', error);
@@ -49,11 +49,25 @@ export function ManagerExpenses() {
   }, [session?.id]);
 
   const handleSubmitExpense = async (e: React.FormEvent) => {
-    e.preventDefault(); // Explicitly type e
+    e.preventDefault();
     if (!newExpense.description || !newExpense.amount || !session) return;
+    if (!account?.branchId) {
+      toast.error('You must be assigned to a branch to submit expenses.');
+      return;
+    }
+
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const payload = {
+      branchId: account.branchId,
+      type: newExpense.type,
+      description: newExpense.description,
+      amount: Number(newExpense.amount),
+      date: today,
+    };
 
     try {
-      await api.post('/expenses', { ...newExpense, amount: Number(newExpense.amount), managerId: session.id, branch: branchName, status: 'PENDING' });
+      await api.post('/expenses', payload);
       toast.success('Expense submitted', { description: 'Awaiting admin approval.' });
       setShowCreateModal(false);
       setNewExpense({ type: 'Equipment Maintenance', description: '', amount: '' });

@@ -49,7 +49,6 @@ export function BankAccessPanel({ role, onBankSelect }: BankAccessPanelProps) {
       await api.post('/bank-access-requests', {
         requesterId: userId,
         bankId: bankId,
-        status: 'PENDING', // Ensure status matches Prisma enum
       });
       toast.success('Request sent to Admin. You will be notified once approved.');
       fetchUserRequests(); // Re-fetch requests to update UI
@@ -75,8 +74,11 @@ export function BankAccessPanel({ role, onBankSelect }: BankAccessPanelProps) {
         {/* Available Banks */}
         <div className="space-y-3 mb-6">
           {AVAILABLE_BANKS.map((bank) => {
-            const request = userRequests.find((r) => r.bankId === bank.id && r.status === 'APPROVED' && (!r.expiresAt || new Date(r.expiresAt) > new Date())); // Find an active approved request
-            const approved = !!request; // Check if an approved request exists
+            const request = userRequests.find((r) => r.bankId === bank.id);
+            const approved = !!request && request.status === 'APPROVED' && (!request.expiresAt || new Date(request.expiresAt) > new Date());
+            const pending = !!request && request.status === 'PENDING';
+            const rejected = !!request && request.status === 'REJECTED';
+            const expired = !!request && request.status === 'APPROVED' && !!request.expiresAt && new Date(request.expiresAt) <= new Date();
             
             return (
               <div
@@ -89,20 +91,22 @@ export function BankAccessPanel({ role, onBankSelect }: BankAccessPanelProps) {
                   </div>
                   <div>
                     <h3 className="font-semibold text-white">{bank.name}</h3>
-                    {request && (
-                      <div className="flex items-center gap-2 mt-1 text-xs"> {/* Check request.status */}
-                        {request.status === 'PENDING' && ( // Use uppercase PENDING
-                          <>
-                            <Clock className="w-3 h-3 text-yellow-400" />
-                            <span className="text-yellow-400">Pending approval</span>
-                          </>
-                        )}
-                        {request.status === 'REJECTED' && ( // Use uppercase REJECTED
-                          <>
-                            <AlertCircle className="w-3 h-3 text-red-400" />
-                            <span className="text-red-400">Request rejected</span>
-                          </>
-                        )}
+                    {pending && (
+                      <div className="flex items-center gap-2 mt-1 text-xs">
+                        <Clock className="w-3 h-3 text-yellow-400" />
+                        <span className="text-yellow-400">Pending approval</span>
+                      </div>
+                    )}
+                    {rejected && (
+                      <div className="flex items-center gap-2 mt-1 text-xs">
+                        <AlertCircle className="w-3 h-3 text-red-400" />
+                        <span className="text-red-400">Request rejected (You can request again)</span>
+                      </div>
+                    )}
+                    {expired && (
+                      <div className="flex items-center gap-2 mt-1 text-xs">
+                        <Clock className="w-3 h-3 text-orange-400" />
+                        <span className="text-orange-400">Access expired (You can request again)</span>
                       </div>
                     )}
                     {approved && (
@@ -125,14 +129,14 @@ export function BankAccessPanel({ role, onBankSelect }: BankAccessPanelProps) {
                 ) : (
                   <button
                     onClick={() => handleRequestAccess(bank.id)}
-                    disabled={!!request}
+                    disabled={pending}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      request
+                      pending
                         ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
                         : 'bg-primary hover:bg-primary/90 text-white'
                     }`}
                   >
-                    {request ? 'Requested' : 'Request Access'}
+                    {pending ? 'Requested' : 'Request Access'}
                   </button>
                 )}
               </div>
@@ -147,9 +151,9 @@ export function BankAccessPanel({ role, onBankSelect }: BankAccessPanelProps) {
             <p className="font-semibold mb-1">How it works:</p>
             <ol className="space-y-1 text-xs">
               <li>1. Request access to a bank portal above</li>
-              <li>2. Admin will review and provide login details</li>
-              <li>3. Access is shown in a secure, private session</li>
-              <li>4. No browser history or tabs are created</li>
+              <li>2. Admin will review and approve your request</li>
+              <li>3. Log in securely using your own portal credentials</li>
+              <li>4. Access approval automatically expires after 24 hours</li>
             </ol>
           </div>
         </div>

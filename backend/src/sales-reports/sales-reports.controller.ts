@@ -11,8 +11,24 @@ export class SalesReportsController {
   constructor(private salesReportsService: SalesReportsService) {}
 
   @Get()
-  findAll(@Query('branchId') branchId?: string, @Query('date') date?: string) {
-    return this.salesReportsService.findAll({ branchId, date });
+  findAll(
+    @Query('branchId') branchId?: string,
+    @Query('date') date?: string,
+    @Query('managerId') managerId?: string,
+  ) {
+    return this.salesReportsService.findAll({ branchId, date, managerId });
+  }
+
+  @Get('today/:managerId')
+  findTodayForManager(@Param('managerId') managerId: string, @Query('date') date?: string) {
+    return this.salesReportsService.findTodayForManager(managerId, date);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'AUDITOR')
+  @Get('audit')
+  findForAudit() {
+    return this.salesReportsService.findForAudit();
   }
 
   @Get(':id')
@@ -35,9 +51,16 @@ export class SalesReportsController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'AUDITOR')
   @Patch(':id/approve')
   approve(@Param('id') id: string) {
     return this.salesReportsService.approve(id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'AUDITOR')
+  @Patch(':id/reject')
+  reject(@Param('id') id: string, @Body('reason') reason?: string) {
+    return this.salesReportsService.reject(id, reason);
   }
 }

@@ -4,7 +4,7 @@ import { Sidebar } from '../../components/dashboard/Sidebar';
 import { RoleBadge } from '../../components/dashboard/RoleBadge';
 import { StatusBadge } from '../../components/dashboard/StatusBadge';
 import {
-  Plus, Search, Ban, CheckCircle, XCircle, Trash2, Users, UserCheck, UserX, Eye, EyeOff,
+  Plus, Search, Ban, CheckCircle, XCircle, Trash2, Users, UserCheck, UserX, Eye, EyeOff, Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { logout, StaffAccount, Role } from '../../lib/auth'; // Import StaffAccount and Role types
@@ -24,6 +24,39 @@ export function UserManagement() {
     name: '', email: '', password: '', role: '' as Role | '', // Use Role enum
     branch: '', location: '',
   });
+
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<StaffAccount | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    name: '', email: '', role: '' as Role | '',
+    branch: '', location: '', phone: '',
+  });
+
+  const openEditModal = (account: StaffAccount) => {
+    setEditingUser(account);
+    setEditFormData({
+      name: account.name || '',
+      email: account.email || '',
+      role: (account.role as Role) || '',
+      branch: account.branch || '',
+      location: account.location || '',
+      phone: account.phone || '',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    try {
+      await api.patch(`/users/${editingUser.id}`, editFormData);
+      toast.success(`Account updated for ${editFormData.name}`);
+      setShowEditModal(false);
+      fetchUsers();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update user');
+    }
+  };
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -228,6 +261,13 @@ export function UserManagement() {
                               )}
                             </button>
                             <button
+                              className="p-2 text-gray-400 hover:text-blue-500 hover:bg-gray-700 rounded-lg transition-colors"
+                              onClick={() => openEditModal(account)}
+                              title="Edit account"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
                               className="p-2 text-gray-400 hover:text-red-500 hover:bg-gray-700 rounded-lg transition-colors"
                               onClick={() => setConfirmAction({ id: account.id, action: 'delete' })}
                               title="Delete account"
@@ -313,9 +353,9 @@ export function UserManagement() {
                   className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary"
                 >
                   <option value="">Select role</option>
-                  <option value="manager">Manager</option>
-                  <option value="accountant">Accountant</option>
-                  <option value="auditor">Auditor</option>
+                  <option value="MANAGER">Manager</option>
+                  <option value="ACCOUNTANT">Accountant</option>
+                  <option value="AUDITOR">Auditor</option>
                 </select>
               </div>
 
@@ -358,6 +398,115 @@ export function UserManagement() {
                   className="flex-1 px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
                 >
                   Create Account
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-700">
+              <h2 className="text-2xl font-bold text-white">Edit User</h2>
+              <p className="text-gray-400 text-sm">Update staff member details and operational role</p>
+            </div>
+
+            <form className="p-6 space-y-5" onSubmit={handleEditUser}>
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editFormData.name}
+                    onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="Enter full name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">Email Address *</label>
+                  <input
+                    type="email"
+                    required
+                    value={editFormData.email}
+                    onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="user@fredvivoil.com"
+                  />
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">Role *</label>
+                  <select
+                    required
+                    value={editFormData.role}
+                    onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value as Role })}
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">Select role</option>
+                    <option value="ADMIN">Super Administrator</option>
+                    <option value="MANAGER">Manager</option>
+                    <option value="ACCOUNTANT">Accountant</option>
+                    <option value="AUDITOR">Auditor</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">Phone Number</label>
+                  <input
+                    type="text"
+                    value={editFormData.phone}
+                    onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="Enter phone number"
+                  />
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">Branch Name</label>
+                  <input
+                    type="text"
+                    value={editFormData.branch}
+                    onChange={(e) => setEditFormData({ ...editFormData, branch: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="e.g., Victoria Island"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">Location</label>
+                  <input
+                    type="text"
+                    value={editFormData.location}
+                    onChange={(e) => setEditFormData({ ...editFormData, location: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="e.g., Lagos"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingUser(null);
+                  }}
+                  className="flex-1 px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>

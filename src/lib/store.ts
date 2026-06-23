@@ -16,6 +16,8 @@ export interface SalesReport { // This interface should ideally be generated fro
   soldAGO: number;
   remainingAGO: number;
   overage: number;
+  overagePMS: number;
+  overageAGO: number;
   pmsPrice: number;
   agoPrice: number;
   pmsSales: number;
@@ -133,6 +135,7 @@ export interface BalanceRequest {
   approvedTime?: string;
   adminPin?: string;
   pinUsed?: boolean;
+  period?: string;
 }
 
 // ── Bank Account & Transactions (populated via bank API when connected) ───────

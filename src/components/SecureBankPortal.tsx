@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { X, Eye, EyeOff } from 'lucide-react';
-import { getApprovedBankAccessRequest, AVAILABLE_BANKS } from '../lib/store';
+import { X, ExternalLink, ShieldCheck, Lock } from 'lucide-react';
+import { AVAILABLE_BANKS, type BankAccessRequest } from '../lib/store';
+import { api } from '../lib/api';
 
 interface SecureBankPortalProps {
   userId: string;
@@ -9,11 +10,44 @@ interface SecureBankPortalProps {
 }
 
 export function SecureBankPortal({ userId, bankId, onClose }: SecureBankPortalProps) {
-  const [showCredentials, setShowCredentials] = useState(false);
-  const [credentialsCopied, setCredentialsCopied] = useState(false);
+  const [approved, setApproved] = useState<BankAccessRequest | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const approved = getApprovedBankAccessRequest(userId, bankId);
   const bank = AVAILABLE_BANKS.find((b) => b.id === bankId);
+
+  useEffect(() => {
+    const fetchAccess = async () => {
+      try {
+        const data = await api.get(`/bank-access-requests/user/${userId}`);
+        const request = data.find((r: BankAccessRequest) => 
+          r.bankId === bankId && 
+          r.status === 'APPROVED' && 
+          (!r.expiresAt || new Date(r.expiresAt) > new Date())
+        );
+        setApproved(request || null);
+      } catch (e) {
+        console.error('Failed to fetch bank access request:', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    if (userId && bankId) {
+      fetchAccess();
+    } else {
+      setLoading(false);
+    }
+  }, [userId, bankId]);
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 flex flex-col items-center justify-center">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-gray-400">Loading secure portal...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!approved || !bank) {
     return (
@@ -32,15 +66,9 @@ export function SecureBankPortal({ userId, bankId, onClose }: SecureBankPortalPr
     );
   }
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCredentialsCopied(true);
-    setTimeout(() => setCredentialsCopied(false), 2000);
-  };
-
   return (
     <div className="fixed inset-0 bg-black/90 flex flex-col z-50">
-      {/* Header - Minimal to avoid drawing attention */}
+      {/* Header */}
       <div className="bg-gray-800 border-b border-gray-700 p-4 flex items-center justify-between">
         <div>
           <h2 className="text-white font-semibold">{bank.name} Portal</h2>
@@ -56,93 +84,69 @@ export function SecureBankPortal({ userId, bankId, onClose }: SecureBankPortalPr
       </div>
 
       {/* Portal Container */}
-      <div className="flex-1 overflow-hidden flex flex-col">
-        {/* Credentials Panel - appears above iframe */}
-        {!showCredentials ? (
-          <div className="bg-gray-700/50 border-b border-gray-600 p-4 flex items-center justify-between">
-            <div className="text-sm text-gray-300">
-              <p className="font-semibold mb-1">Login Credentials Provided</p>
-              <p className="text-xs text-gray-400">Click the button below to view your login details</p>
-            </div>
-            <button
-              onClick={() => setShowCredentials(true)}
-              className="ml-4 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-2"
-            >
-              <Eye className="w-4 h-4" />
-              View Credentials
-            </button>
+      <div className="flex-1 overflow-hidden flex flex-col items-center justify-center p-6 bg-gray-950/80 relative">
+        {/* Decorative background glow */}
+        <div 
+          className="absolute inset-0 pointer-events-none transition-all duration-300" 
+          style={{
+            backgroundImage: `radial-gradient(circle at center, ${
+              bankId === 'uba' ? 'rgba(239,68,68,0.1)' : 'rgba(220,38,38,0.08)'
+            } 0%, transparent 70%)`
+          }}
+        />
+
+        <div className="max-w-md w-full bg-gray-900/60 backdrop-blur-xl border border-gray-800 rounded-2xl p-8 shadow-2xl relative z-10 flex flex-col items-center text-center space-y-6">
+          <div className={`w-16 h-16 bg-gradient-to-br ${
+            bankId === 'uba' 
+              ? 'from-red-500/20 to-red-600/5 border-red-500/30' 
+              : 'from-red-600/20 to-red-700/5 border-red-600/30'
+          } border rounded-2xl flex items-center justify-center shadow-inner`}>
+            <Lock className={`w-8 h-8 ${bankId === 'uba' ? 'text-red-500' : 'text-red-600'}`} />
           </div>
-        ) : (
-          <div className="bg-blue-500/20 border-b border-blue-500/40 p-4 space-y-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-semibold text-blue-300">Login Credentials</span>
-              <button
-                onClick={() => setShowCredentials(false)}
-                className="text-blue-300 hover:text-blue-200"
-              >
-                <EyeOff className="w-4 h-4" />
-              </button>
-            </div>
 
-            <div className="space-y-2 bg-gray-800 rounded p-3">
-              <div>
-                <label className="text-xs text-gray-400">Username</label>
-                <div className="flex gap-2 mt-1">
-                  <input
-                    type="text"
-                    value={approved.loginUsername || ''}
-                    readOnly
-                    className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm"
-                  />
-                  <button
-                    onClick={() => copyToClipboard(approved.loginUsername || '')}
-                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition-colors"
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-gray-400">Password</label>
-                <div className="flex gap-2 mt-1">
-                  <input
-                    type="password"
-                    value={approved.loginPassword || ''}
-                    readOnly
-                    className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm"
-                  />
-                  <button
-                    onClick={() => copyToClipboard(approved.loginPassword || '')}
-                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition-colors"
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-
-              {credentialsCopied && (
-                <p className="text-xs text-green-400 text-center mt-2">✓ Copied to clipboard</p>
-              )}
-            </div>
-
-            <p className="text-xs text-gray-400 border-t border-gray-600 pt-2">
-              📌 Use the credentials above to log into {bank.name} portal. This session will not be saved in your browser history.
+          <div className="space-y-2">
+            <h3 className="text-2xl font-bold text-white tracking-tight">{bank.name} Portal Access</h3>
+            <p className="text-gray-400 text-sm">
+              For security reasons, bank websites cannot be embedded directly within the application. Please use the button below to launch the portal.
             </p>
           </div>
-        )}
 
-        {/* Iframe */}
-        <iframe
-          src={bank.url}
-          className="flex-1 w-full border-0"
-          title={`${bank.name} Bank Portal`}
-          sandbox="allow-same-origin allow-forms allow-scripts allow-popups allow-popups-to-escape-sandbox"
-          allow="geolocation"
-        />
+          <div className="w-full bg-gray-950/40 border border-gray-800/80 rounded-xl p-4 text-left space-y-3">
+            <div className="flex gap-3 items-start">
+              <ShieldCheck className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-gray-300">
+                <strong className="text-gray-200">Secure Direct Access:</strong> You will authenticate directly on the official banking platform.
+              </p>
+            </div>
+            <div className="flex gap-3 items-start">
+              <ShieldCheck className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-gray-300">
+                <strong className="text-gray-200">No Credentials Logged:</strong> The application does not store, intercept, or handle your bank credentials.
+              </p>
+            </div>
+            <div className="flex gap-3 items-start">
+              <ShieldCheck className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-gray-300">
+                <strong className="text-gray-200">24h Expiry:</strong> This access approval will expire automatically in 24 hours.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => window.open(bank.url, '_blank')}
+            className={`w-full py-4 px-6 bg-gradient-to-r ${
+              bankId === 'uba'
+                ? 'from-red-600 to-red-800 hover:from-red-500 hover:to-red-700 shadow-red-500/20'
+                : 'from-red-700 to-red-900 hover:from-red-600 hover:to-red-800 shadow-red-700/20'
+            } text-white font-semibold rounded-xl shadow-lg transform hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 flex items-center justify-center gap-2 group animate-pulse`}
+          >
+            <ExternalLink className="w-5 h-5 group-hover:scale-110 transition-transform" />
+            Open {bank.name} Portal in New Tab
+          </button>
+        </div>
       </div>
 
-      {/* Footer - Privacy Notice */}
+      {/* Footer */}
       <div className="bg-gray-800 border-t border-gray-700 px-4 py-3 text-xs text-gray-400 flex items-center justify-between">
         <span>🔒 This session is private and won't be saved in browser history</span>
         <button

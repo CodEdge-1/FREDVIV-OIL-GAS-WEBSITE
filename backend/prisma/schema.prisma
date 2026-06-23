@@ -85,6 +85,8 @@ model SalesReport {
   soldAGO        Float
   remainingAGO   Float
   overage        Float    @default(0)
+  overagePMS     Float    @default(0)
+  overageAGO     Float    @default(0)
   pmsPrice       Float
   agoPrice       Float
   pmsSales       Float
@@ -177,11 +179,16 @@ model ActivityLog {
 }
 
 model ChatMessage {
-  id        String   @id @default(uuid())
-  text      String
-  senderId  String
-  sender    User     @relation(fields: [senderId], references: [id])
-  createdAt DateTime @default(now())
+  id             String   @id @default(uuid())
+  roomId         String   @default("broadcast")
+  text           String
+  attachmentUrl  String?
+  attachmentName String?
+  attachmentType String?
+  attachmentSize Int?
+  senderId       String
+  sender         User     @relation(fields: [senderId], references: [id])
+  createdAt      DateTime @default(now())
 }
 
 model Transaction {
@@ -204,6 +211,7 @@ model BalanceRequest {
   approvedTime DateTime?
   adminPin     String?
   pinUsed      Boolean       @default(false)
+  period       String        @default("ALL_TIME")
 
   requester    User          @relation(fields: [requesterId], references: [id])
   requesterId  String

@@ -14,7 +14,6 @@ import {
   Receipt,
   Menu,
   X,
-  Bell,
 } from 'lucide-react';
 import { getSession, Role } from '../../lib/auth'; // Import Role type
 import { api } from '../../lib/api'; // Import api
@@ -27,24 +26,25 @@ interface SidebarProps {
 export function Sidebar({ role, onLogout }: SidebarProps) {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [notifCount, setNotifCount] = useState(0); // This will be fetched from API
   const [chatCount, setChatCount] = useState(0); // This will be fetched from API
 
   const session = getSession();
   const userId = session?.id ?? '';
 
-  // Fetch notification and chat unread counts from API
+  // Fetch chat unread counts from API
   useEffect(() => {
     const fetchCounts = async () => {
-      if (!userId) return;
+      const token = localStorage.getItem('authToken');
+      if (!userId || !token) return;
       try {
-        const [notifData, chatData] = await Promise.all([
-          api.get(`/users/${userId}/notifications/unread-count`), // Assuming this endpoint exists
-          api.get(`/chat/unread-count/${userId}`), // Assuming this endpoint exists
-        ]);
-        setNotifCount(notifData.count);
+        const chatData = await api.get(`/chat/unread-count/${userId}`);
         setChatCount(chatData.count);
-      } catch (error) {
+      } catch (error: any) {
+        // If unauthorized, token might be expired. Stop polling or handle logout.
+        if (error.message === 'Unauthorized' || error.message?.includes('401')) {
+          console.warn('Unauthorized, stopping polling');
+          return;
+        }
         console.error('Failed to fetch unread counts:', error);
       }
     };
@@ -172,20 +172,6 @@ export function Sidebar({ role, onLogout }: SidebarProps) {
 
       {/* Notification summary + Logout */}
       <div className="p-4 border-t border-gray-700 space-y-1">
-        {/* Notification bell row */}
-        {notifCount > 0 && (
-          <Link
-            to={`/staff/${lowerCaseRole}/settings`} // Use lowerCaseRole for path
-            onClick={() => setMobileOpen(false)}
-            className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-yellow-400 hover:bg-gray-700 transition-colors"
-          >
-            <Bell className="w-5 h-5 flex-shrink-0" />
-            <span className="flex-1 text-sm font-medium">Notifications</span>
-            <span className="flex-shrink-0 min-w-[20px] h-5 px-1.5 bg-yellow-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
-              {notifCount > 99 ? '99+' : notifCount}
-            </span>
-          </Link>
-        )}
         <button
           onClick={onLogout}
           className="flex items-center gap-3 px-4 py-3 w-full text-gray-300 hover:bg-gray-700 hover:text-white rounded-lg transition-colors"

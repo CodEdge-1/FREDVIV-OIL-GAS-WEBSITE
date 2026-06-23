@@ -3,8 +3,32 @@ import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
-import { type SalesReport } from '../../lib/store'; // Keep type for now, will replace with backend type
-import { FileBarChart2, FileText } from 'lucide-react';
+import { type SalesReport } from '../../lib/store';
+import { FileBarChart2, FileText, CheckCircle, AlertTriangle, ClipboardCheck } from 'lucide-react';
+
+type AuditStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUBMITTED';
+
+function AuditStatusBadge({ status }: { status: AuditStatus }) {
+  const displayStatus = status === 'SUBMITTED' ? 'PENDING' : status;
+  const styles: Record<string, string> = {
+    PENDING: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20',
+    APPROVED: 'bg-green-500/10 text-green-400 border border-green-500/20',
+    REJECTED: 'bg-red-500/10 text-red-400 border border-red-500/20',
+  };
+  const labels: Record<string, string> = { PENDING: 'Pending Review', APPROVED: 'Audited', REJECTED: 'Flagged' };
+  
+  const currentStyle = styles[displayStatus] || styles.PENDING;
+  const currentLabel = labels[displayStatus] || 'Pending Review';
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${currentStyle}`}>
+      {displayStatus === 'PENDING' && <ClipboardCheck className="w-3 h-3" />}
+      {displayStatus === 'APPROVED' && <CheckCircle className="w-3 h-3" />}
+      {displayStatus === 'REJECTED' && <AlertTriangle className="w-3 h-3" />}
+      {currentLabel}
+    </span>
+  );
+}
 
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 0 }).format(amount);
@@ -16,7 +40,7 @@ export function AccountantReports() {
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const data = await api.get('/sales-reports'); // Assuming an endpoint for all sales reports
+        const data = await api.get('/sales-reports');
         setReports(data);
       } catch (error) {
         console.error('Failed to fetch sales reports:', error);
@@ -57,12 +81,12 @@ export function AccountantReports() {
               <table className="w-full">
                 <thead className="bg-emerald-500/10">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-emerald-300 uppercase tracking-wider">Branch</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-emerald-300 uppercase tracking-wider">Date</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-emerald-300 uppercase tracking-wider">PMS Sold</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-emerald-300 uppercase tracking-wider">AGO Sold</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-emerald-300 uppercase tracking-wider">Total Sales</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-emerald-300 uppercase tracking-wider">Payments Received</th>
+                    <th className="px-5 py-3 text-left text-xs font-medium text-emerald-300 uppercase tracking-wider">Branch</th>
+                    <th className="px-5 py-3 text-left text-xs font-medium text-emerald-300 uppercase tracking-wider">Date</th>
+                    <th className="px-5 py-3 text-right text-xs font-medium text-emerald-300 uppercase tracking-wider">Declared Sales</th>
+                    <th className="px-5 py-3 text-right text-xs font-medium text-emerald-300 uppercase tracking-wider">Total Received</th>
+                    <th className="px-5 py-3 text-right text-xs font-medium text-emerald-300 uppercase tracking-wider">Variance</th>
+                    <th className="px-5 py-3 text-left text-xs font-medium text-emerald-300 uppercase tracking-wider">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-700">
@@ -81,19 +105,35 @@ export function AccountantReports() {
                   ) : (
                     reports.map((r) => {
                       const totalPayments = r.cardPayments + r.bankTransfers + r.cashPayments;
+                      const variance = r.totalSales - totalPayments;
+                      const isClean = variance === 0;
                       return (
                         <tr key={r.id} className="hover:bg-gray-700/30 transition-colors">
-                          <td className="px-6 py-4">
+                          <td className="px-5 py-4">
                             <p className="text-white font-medium text-sm">{r.branch}</p>
                             <p className="text-gray-500 text-xs">{r.location}</p>
+                            <p className="text-gray-600 text-xs font-mono">{r.id}</p>
                           </td>
-                          <td className="px-6 py-4 text-gray-300 text-sm">{r.date}</td>
-                          <td className="px-6 py-4 text-right text-white text-sm">{r.soldPMS.toLocaleString()} L</td>
-                          <td className="px-6 py-4 text-right text-white text-sm">{r.soldAGO.toLocaleString()} L</td>
-                          <td className="px-6 py-4 text-right font-semibold text-white text-sm">{formatCurrency(r.totalSales)}</td>
-                          <td className="px-6 py-4 text-right text-sm">
-                            <p className="text-white font-semibold">{formatCurrency(totalPayments)}</p>
-                            <p className="text-xs text-gray-500 mt-0.5">Cash · Card · Transfer</p>
+                          <td className="px-5 py-4 text-gray-300 text-sm">{r.date}</td>
+                          <td className="px-5 py-4 text-right">
+                            <p className="text-white font-semibold text-sm">{formatCurrency(r.totalSales)}</p>
+                            <p className="text-gray-500 text-xs">{(r.soldPMS + r.soldAGO).toLocaleString()} L total</p>
+                          </td>
+                          <td className="px-5 py-4 text-right text-sm">
+                            <p className="text-white font-bold">{formatCurrency(totalPayments)}</p>
+                            <div className="text-xs text-gray-500 space-y-0.5 mt-1">
+                              <p>Card: {formatCurrency(r.cardPayments)}</p>
+                              <p>Transfer: {formatCurrency(r.bankTransfers)}</p>
+                              <p>Cash: {formatCurrency(r.cashPayments)}</p>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4 text-right">
+                            <span className={`text-sm font-bold ${isClean ? 'text-green-400' : variance > 0 ? 'text-red-400' : 'text-orange-400'}`}>
+                              {isClean ? '—' : variance > 0 ? `-${formatCurrency(variance)}` : `+${formatCurrency(Math.abs(variance))}`}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4">
+                            <AuditStatusBadge status={r.status} />
                           </td>
                         </tr>
                       );

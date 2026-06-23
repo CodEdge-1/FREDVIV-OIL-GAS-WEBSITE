@@ -1,16 +1,35 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+import { IsString, IsNumber, IsNotEmpty, IsEnum, IsOptional } from 'class-validator';
+
 export class CreateExpenseDto {
+  @IsString()
+  @IsNotEmpty()
   branchId: string;
+
+  @IsString()
+  @IsNotEmpty()
   type: string;
+
+  @IsString()
+  @IsNotEmpty()
   description: string;
+
+  @IsNumber()
   amount: number;
+
+  @IsString()
+  @IsNotEmpty()
   date: string;
 }
 
 export class ReviewExpenseDto {
+  @IsEnum(['approve', 'reject'])
   action: 'approve' | 'reject';
+
+  @IsOptional()
+  @IsString()
   rejectReason?: string;
 }
 
@@ -27,22 +46,34 @@ const expenseSelect = {
 export class ExpensesService {
   constructor(private prisma: PrismaService) {}
 
-  findAll(branchId?: string) {
-    return this.prisma.expense.findMany({
-      where: { branchId },
+  private mapExpense(e: any) {
+    if (!e) return null;
+    return {
+      ...e,
+      branch: e.branch?.name || 'N/A',
+      managerId: e.manager?.id || null,
+      managerName: e.manager?.name || 'N/A',
+      approvedByName: e.approvedBy?.name || null,
+    };
+  }
+
+  async findAll(branchId?: string, managerId?: string) {
+    const expenses = await this.prisma.expense.findMany({
+      where: { branchId, managerId },
       select: expenseSelect,
       orderBy: { createdAt: 'desc' },
     });
+    return expenses.map((e) => this.mapExpense(e));
   }
 
   async findOne(id: string) {
     const expense = await this.prisma.expense.findUnique({ where: { id }, select: expenseSelect });
     if (!expense) throw new NotFoundException('Expense not found');
-    return expense;
+    return this.mapExpense(expense);
   }
 
-  create(dto: CreateExpenseDto, userId: string) {
-    return this.prisma.expense.create({
+  async create(dto: CreateExpenseDto, userId: string) {
+    const expense = await this.prisma.expense.create({
       data: {
         branchId: dto.branchId,
         managerId: userId,
@@ -53,6 +84,7 @@ export class ExpensesService {
       },
       select: expenseSelect,
     });
+    return this.mapExpense(expense);
   }
 
   async review(id: string, dto: ReviewExpenseDto, adminId: string) {
@@ -60,7 +92,7 @@ export class ExpensesService {
     if (!expense) throw new NotFoundException('Expense not found');
     if (expense.status !== 'PENDING') throw new BadRequestException('Expense already reviewed');
 
-    return this.prisma.expense.update({
+    const updated = await this.prisma.expense.update({
       where: { id },
       data: {
         status: dto.action === 'approve' ? 'APPROVED' : 'REJECTED',
@@ -68,5 +100,6 @@ export class ExpensesService {
       },
       select: expenseSelect,
     });
+    return this.mapExpense(updated);
   }
 }

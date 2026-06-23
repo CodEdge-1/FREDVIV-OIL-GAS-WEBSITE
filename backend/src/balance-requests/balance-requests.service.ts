@@ -7,33 +7,65 @@ import * as bcrypt from 'bcryptjs';
 export class BalanceRequestsService {
   constructor(private prisma: PrismaService) {}
 
+  private mapBalanceRequest(r: any) {
+    if (!r) return null;
+    return {
+      ...r,
+      requester: r.requester?.name || 'Unknown',
+    };
+  }
+
   async findAll() {
-    return this.prisma.balanceRequest.findMany({
+    const list = await this.prisma.balanceRequest.findMany({
       orderBy: { requestTime: 'desc' },
       include: { requester: true }
     });
+    return list.map((r) => this.mapBalanceRequest(r));
   }
 
   async findPending() {
-    return this.prisma.balanceRequest.findMany({
+    const list = await this.prisma.balanceRequest.findMany({
       where: { status: RequestStatus.PENDING },
       orderBy: { requestTime: 'asc' },
       include: { requester: true }
     });
+    return list.map((r) => this.mapBalanceRequest(r));
   }
 
-  async create(requesterId: string, role: Role) {
+  async findUserPendingRequest(requesterId: string) {
+    return this.prisma.balanceRequest.findFirst({
+      where: { requesterId, status: RequestStatus.PENDING },
+      orderBy: { requestTime: 'desc' }
+    });
+  }
+
+  async findUserApprovedRequest(requesterId: string) {
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    return this.prisma.balanceRequest.findFirst({
+      where: { 
+        requesterId, 
+        status: RequestStatus.APPROVED, 
+        pinUsed: false,
+        approvedTime: {
+          gte: fifteenMinutesAgo
+        }
+      },
+      orderBy: { requestTime: 'desc' }
+    });
+  }
+
+  async create(requesterId: string, role: Role, period: string = 'ALL_TIME') {
     return this.prisma.balanceRequest.create({
       data: { 
         requesterId, 
         role, 
-        status: RequestStatus.PENDING 
+        status: RequestStatus.PENDING,
+        period
       },
     });
   }
 
   async approve(id: string, rawPin: string) {
-    // Hook: Hash the PIN before saving to DB
     const hashedPin = await bcrypt.hash(rawPin, 10);
 
     return this.prisma.balanceRequest.update({
@@ -42,6 +74,15 @@ export class BalanceRequestsService {
         status: RequestStatus.APPROVED,
         adminPin: hashedPin,
         approvedTime: new Date(),
+      },
+    });
+  }
+
+  async reject(id: string) {
+    return this.prisma.balanceRequest.update({
+      where: { id },
+      data: {
+        status: RequestStatus.REJECTED,
       },
     });
   }
@@ -55,13 +96,23 @@ export class BalanceRequestsService {
       throw new UnauthorizedException('Invalid or already used request');
     }
 
-    // Hook: Compare hashed PIN
+    if (request.approvedTime) {
+      const elapsedMs = new Date().getTime() - new Date(request.approvedTime).getTime();
+      const fifteenMinutesMs = 15 * 60 * 1000;
+      if (elapsedMs > fifteenMinutesMs) {
+        await this.prisma.balanceRequest.update({
+          where: { id },
+          data: { pinUsed: true }
+        });
+        throw new UnauthorizedException('The PIN has expired (15-minute limit).');
+      }
+    }
+
     const isValid = await bcrypt.compare(rawPin, request.adminPin);
     if (!isValid) {
       throw new UnauthorizedException('Incorrect PIN');
     }
 
-    // Mark as used immediately to prevent replay attacks
     await this.prisma.balanceRequest.update({
       where: { id },
       data: { pinUsed: true }

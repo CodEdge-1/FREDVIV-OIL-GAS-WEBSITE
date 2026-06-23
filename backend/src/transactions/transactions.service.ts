@@ -21,7 +21,13 @@ export class TransactionsService {
     });
   }
 
-  create(dto: CreateTransactionDto) {
+  async create(dto: CreateTransactionDto) {
+    const lastTransaction = await this.prisma.transaction.findFirst({
+      orderBy: { createdAt: 'desc' },
+    });
+    const previousBalance = lastTransaction?.balance || 0;
+    const newBalance = dto.type === 'CREDIT' ? previousBalance + dto.amount : previousBalance - dto.amount;
+
     return this.prisma.transaction.create({
       data: {
         reference: dto.reference,
@@ -29,6 +35,7 @@ export class TransactionsService {
         amount: dto.amount,
         type: dto.type,
         date: new Date(dto.date),
+        balance: newBalance,
       },
     });
   }

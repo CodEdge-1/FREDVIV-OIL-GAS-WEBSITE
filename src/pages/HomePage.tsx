@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import { ArrowRight, CheckCircle, Phone, Fuel, Droplet, Flame } from 'lucide-react';
-import { ImageWithFallback } from '../components/figma/ImageWithFallback';
+import { ImageWithFallback } from '../components/ui/ImageWithFallback';
 
 export function HomePage() {
   return (

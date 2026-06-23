@@ -11,8 +11,8 @@ export class ExpensesController {
   constructor(private expensesService: ExpensesService) {}
 
   @Get()
-  findAll(@Query('branchId') branchId?: string) {
-    return this.expensesService.findAll(branchId);
+  findAll(@Query('branchId') branchId?: string, @Query('managerId') managerId?: string) {
+    return this.expensesService.findAll(branchId, managerId);
   }
 
   @Get(':id')

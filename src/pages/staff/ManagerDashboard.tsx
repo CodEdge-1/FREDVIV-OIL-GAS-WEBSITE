@@ -24,14 +24,20 @@ export function ManagerDashboard() {
       try {
         const [userData, priceData, salesData, expensesData] = await Promise.all([
           api.get(`/users/${session.id}`),
-          api.get('/prices'), // Assuming an endpoint for global prices
-          api.get(`/sales-reports/today/${session.id}`), // Assuming an endpoint for today's sales report for a manager
-          api.get(`/expenses/manager/${session.id}`), // Assuming an endpoint for manager's expenses
+          api.get('/fuel-prices/current').catch(() => ({ pms: 0, ago: 0 })),
+          api.get(`/sales-reports`),
+          api.get(`/expenses`),
         ]);
+
+        const managerSales = salesData.filter((s: any) => s.manager?.id === session.id);
+        const todayStr = new Date().toISOString().split('T')[0];
+        const todaySales = managerSales.find((s: any) => s.date === todayStr) || null;
+        const managerExpenses = expensesData.filter((e: any) => e.manager?.id === session.id);
+
         setAccount(userData);
         setPrices(priceData);
-        setTodaySales(salesData);
-        setPendingExpensesCount(expensesData.filter((e: any) => e.status === 'PENDING').length);
+        setTodaySales(todaySales);
+        setPendingExpensesCount(managerExpenses.filter((e: any) => e.status === 'PENDING').length);
       } catch (error) {
         console.error('Failed to fetch dashboard data:', error);
         toast.error('Failed to load dashboard data.');

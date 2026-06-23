@@ -11,7 +11,7 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "paths": {
-      "*": ["./src/*"] // This tells TypeScript to look for non-relative imports inside the 'src' directory.
+      "*": ["./src/*"]
     },
     "incremental": true,
     "skipLibCheck": true,
@@ -20,5 +20,7 @@
     "strictBindCallApply": false,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": false
-  }
+  },
+  "include": ["src/**/*"]
 }
+

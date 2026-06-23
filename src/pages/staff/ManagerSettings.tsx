@@ -2,24 +2,20 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Sidebar } from '../../components/dashboard/Sidebar';
 import { getSession, logout, StaffAccount, Role } from '../../lib/auth'; // Import Role
-import { type AppNotification } from '../../lib/store'; // Keep type for now, will replace with backend type
 import { toast } from 'sonner';
 import {
   User,
-  Bell,
   Building2,
   Eye,
   EyeOff,
   Save,
   Check,
   ShieldCheck,
-  CheckCheck,
-  BellOff,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { ProfileSection } from './ProfileSection';
 
-type Tab = 'profile' | 'notifications' | 'branch';
+type Tab = 'profile' | 'branch';
 
 // ── Reusable sub-components ──────────────────────────────────────────────────
 
@@ -127,116 +123,6 @@ function SaveButton({ onClick, saved }: { onClick: () => void; saved: boolean })
 
 // ── Tab Sections ─────────────────────────────────────────────────────────────
 
-function NotificationsSection() {
-  const session = getSession(); // Assuming getSession still works for current user ID
-  const recipientId = session?.id || '';
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-
-  const fetchNotifications = async () => {
-    if (!recipientId) return;
-    try {
-      const data = await api.get(`/users/${recipientId}/notifications`);
-      setNotifications(data);
-    } catch (error) {
-      console.error('Failed to fetch notifications:', error);
-      toast.error('Failed to load notifications.');
-    }
-  };
-
-  useEffect(() => {
-    fetchNotifications();
-  }, [recipientId]);
-
-  const unreadCount = notifications.filter((n) => !n.read).length;
-
-  const handleMarkRead = async (id: string) => {
-    try {
-      await api.patch(`/users/${recipientId}/notifications/${id}`, { read: true });
-      fetchNotifications(); // Re-fetch to update UI
-    } catch (error) {
-      toast.error('Failed to mark notification as read.');
-    }
-  };
-
-  const handleMarkAllRead = async () => {
-    try {
-      await api.patch(`/users/${recipientId}/notifications/mark-all-read`);
-      fetchNotifications(); // Re-fetch to update UI
-    } catch (error) {
-      toast.error('Failed to mark all notifications as read.');
-    }
-  };
-
-  const formatTime = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleString('en-NG', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', hour12: true,
-    });
-  };
-
-  return (
-    <div className="space-y-6">
-      <SectionCard
-        title="Notifications"
-        description="Alerts and updates from admin about your branch activities."
-      >
-        {notifications.length > 0 && unreadCount > 0 && (
-          <div className="flex justify-end mb-4">
-            <button
-              onClick={handleMarkAllRead}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-            >
-              <CheckCheck className="w-3.5 h-3.5" />
-              Mark all as read
-            </button>
-          </div>
-        )}
-
-        {notifications.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-12">
-            <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center">
-              <BellOff className="w-6 h-6 text-gray-500" />
-            </div>
-            <p className="text-gray-400 font-medium text-sm">No notifications yet</p>
-            <p className="text-gray-500 text-xs text-center">
-              You'll be notified here when admin approves or rejects your expenses, or updates fuel prices.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {notifications.map((notif) => (
-              <div
-                key={notif.id}
-                onClick={() => !notif.read && handleMarkRead(notif.id)}
-                className={`flex items-start gap-3 p-3.5 rounded-lg border transition-colors ${
-                  notif.read
-                    ? 'border-gray-700 bg-transparent opacity-60'
-                    : 'border-primary/20 bg-primary/5 cursor-pointer hover:bg-primary/10'
-                }`}
-              >
-                <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${notif.read ? 'bg-gray-600' : 'bg-primary'}`} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className={`text-sm font-medium ${notif.read ? 'text-gray-400' : 'text-white'}`}>
-                      {notif.title}
-                    </p>
-                    {!notif.read && (
-                      <span className="text-xs px-1.5 py-0.5 bg-primary/20 text-primary rounded-full flex-shrink-0">NEW</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{notif.body}</p>
-                  <p className="text-xs text-gray-600 mt-1">{formatTime(notif.createdAt)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
-    </div>
-  );
-}
-
 function BranchSection() {
   const session = getSession(); // Assuming getSession still works for current user ID
   const [account, setAccount] = useState<StaffAccount | null>(null);
@@ -248,7 +134,7 @@ function BranchSection() {
       try {
         const [userData, priceData] = await Promise.all([
           api.get(`/users/${session.id}`),
-          api.get('/prices'), // Assuming an endpoint for global prices
+          api.get('/fuel-prices/current'), // Assuming an endpoint for global prices
         ]);
         setAccount(userData);
         setPrices(priceData);
@@ -352,7 +238,6 @@ function BranchSection() {
 
 const TABS: { id: Tab; label: string; icon: React.ElementType; description: string }[] = [
   { id: 'profile', label: 'Profile', icon: User, description: 'Personal info & password' },
-  { id: 'notifications', label: 'Notifications', icon: Bell, description: 'Alert preferences' },
   { id: 'branch', label: 'Branch', icon: Building2, description: 'Branch info & preferences' },
 ];
 
@@ -404,7 +289,6 @@ export function ManagerSettings() {
             {/* Tab Content */}
             <div className="flex-1 min-w-0">
               {activeTab === 'profile' && <ProfileSection roleLabel="Branch Manager" />}
-              {activeTab === 'notifications' && <NotificationsSection />}
               {activeTab === 'branch' && <BranchSection />}
             </div>
           </div>

@@ -32,7 +32,7 @@ export function ExpenseApprovals() {
     if (!expenseToUpdate) return;
 
     try {
-      await api.patch(`/expenses/${id}/status`, { status: 'APPROVED' }); // Assuming an endpoint to update status
+      await api.patch(`/expenses/${id}/review`, { action: 'approve' }); // Use backend review endpoint
       await api.post('/notifications', { // Send notification via API
         userId: expenseToUpdate.managerId,
         title: 'Expense Approved',
@@ -57,7 +57,7 @@ export function ExpenseApprovals() {
     if (!expenseToUpdate) return;
 
     try {
-      await api.patch(`/expenses/${id}/status`, { status: 'REJECTED' }); // Assuming an endpoint to update status
+      await api.patch(`/expenses/${id}/review`, { action: 'reject' }); // Use backend review endpoint
       await api.post('/notifications', { // Send notification via API
         userId: expenseToUpdate.managerId,
         title: 'Expense Rejected',
@@ -187,3 +187,4 @@ export function ExpenseApprovals() {
     </div>
   );
 }
+
