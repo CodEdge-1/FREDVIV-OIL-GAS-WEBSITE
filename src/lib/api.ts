@@ -1,6 +1,6 @@
 import { getAuthToken } from './auth'; // Import getAuthToken
 
-const BASE_URL = 'http://localhost:3001/api'; // Your NestJS backend
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 async function request(endpoint: string, options: RequestInit = {}) {
   const token = getAuthToken(); // Get token directly

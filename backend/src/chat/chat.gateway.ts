@@ -13,13 +13,9 @@ import { ChatService } from './chat.service';
 
 @WebSocketGateway({
   cors: {
-    origin: [
-      process.env.FRONTEND_URL || 'http://localhost:3000',
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173',
-    ],
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      callback(null, true);
+    },
     credentials: true,
   },
   namespace: '/chat',
