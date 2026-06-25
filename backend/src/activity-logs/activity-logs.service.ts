@@ -10,7 +10,7 @@ export class ActivityLogsService {
     let type: ActivityType = ActivityType.USER;
     if (createActivityLogDto.type) {
       const typeStr = createActivityLogDto.type.toUpperCase();
-      if (['EXPENSE', 'PRICE', 'BALANCE', 'SECURITY', 'USER'].includes(typeStr)) {
+      if (['EXPENSE', 'PRICE', 'BALANCE', 'SECURITY', 'USER', 'SALES'].includes(typeStr)) {
         type = typeStr as ActivityType;
       }
     }

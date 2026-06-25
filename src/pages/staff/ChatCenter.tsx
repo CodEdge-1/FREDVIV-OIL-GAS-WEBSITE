@@ -134,11 +134,15 @@ export function ChatCenter() {
       },
     ];
 
-    if (isAdmin) {
+    const isStaffDMAllowed = role === Role.ADMIN || role === Role.ACCOUNTANT || role === Role.AUDITOR;
+
+    if (isStaffDMAllowed) {
       staffList.forEach(staff => {
         if (staff.id !== currentUser.id) {
+          const sortedIds = [currentUser.id, staff.id].sort();
+          const roomId = `dm-${sortedIds[0]}_${sortedIds[1]}`;
           result.push({
-            id: `dm-${staff.id}`,
+            id: roomId,
             type: 'direct',
             name: staff.name,
             role: staff.role,
@@ -148,16 +152,22 @@ export function ChatCenter() {
           });
         }
       });
-    } else {
-      // Staff see a DM with Admin
-      result.push({
-        id: `dm-${currentUser.id}`,
-        type: 'direct',
-        name: 'Administrator',
-        role: Role.ADMIN,
-        online: false,
-        unread: 0,
-        messages: [],
+    } else if (role === Role.MANAGER) {
+      // Managers see DMs with Admin, Accountants, and Auditors
+      staffList.forEach(staff => {
+        if (staff.role === Role.ADMIN || staff.role === Role.ACCOUNTANT || staff.role === Role.AUDITOR) {
+          const sortedIds = [currentUser.id, staff.id].sort();
+          const roomId = `dm-${sortedIds[0]}_${sortedIds[1]}`;
+          result.push({
+            id: roomId,
+            type: 'direct',
+            name: staff.role === Role.ADMIN ? 'Administrator' : staff.name,
+            role: staff.role,
+            online: false,
+            unread: 0,
+            messages: [],
+          });
+        }
       });
     }
     
@@ -169,27 +179,63 @@ export function ChatCenter() {
       }
       return newConv;
     }));
-  }, [staffList, isAdmin, currentUser.id]);
+  }, [staffList, role, currentUser.id]);
 
-  // Fetch Last Messages for Previews
+  // Fetch Last Messages for Previews & dynamically load other active rooms (like monitored chats for Admin)
   useEffect(() => {
     if (conversations.length === 0) return;
     
     api.get('/chat/conversations/last-messages')
       .then((lastMsgs: any[]) => {
-        setConversations(prev => prev.map(c => {
-          const match = lastMsgs.find(m => m.roomId === c.id);
-          if (match && c.messages.length === 0) {
-            return {
-              ...c,
-              messages: [mapBackendMessage(match.message)],
-            };
-          }
-          return c;
-        }));
+        setConversations(prev => {
+          const updated = [...prev];
+          
+          lastMsgs.forEach(m => {
+            const existingIdx = updated.findIndex(c => c.id === m.roomId);
+            const mappedMsg = mapBackendMessage(m.message);
+            
+            if (existingIdx !== -1) {
+              if (updated[existingIdx].messages.length === 0) {
+                updated[existingIdx] = {
+                  ...updated[existingIdx],
+                  messages: [mappedMsg],
+                };
+              }
+            } else {
+              // This is a room not in our pre-populated list!
+              // For Admin, it's likely a monitored conversation between other users.
+              let roomName = 'Monitored Room';
+              let roomRole: Role | undefined = undefined;
+              
+              if (m.roomId.startsWith('dm-')) {
+                const ids = m.roomId.replace('dm-', '').split('_');
+                const participants = ids.map(id => staffList.find(s => s.id === id)).filter(Boolean);
+                if (participants.length === 2) {
+                  roomName = `${participants[0]?.name} & ${participants[1]?.name}`;
+                } else if (participants.length === 1) {
+                  roomName = `Chat: ${participants[0]?.name}`;
+                } else {
+                  roomName = `Private DM (${ids.join(', ')})`;
+                }
+              }
+              
+              updated.push({
+                id: m.roomId,
+                type: 'direct',
+                name: roomName,
+                role: roomRole,
+                online: false,
+                unread: 0,
+                messages: [mappedMsg],
+              });
+            }
+          });
+          
+          return updated;
+        });
       })
       .catch(console.error);
-  }, [conversations.length]);
+  }, [conversations.length, staffList]);
 
   // 3. Setup Socket.IO
   useEffect(() => {
@@ -217,23 +263,47 @@ export function ChatCenter() {
 
     newSocket.on('new-message', (msg: any) => {
       const mapped = mapBackendMessage(msg);
-      setConversations(prev => prev.map(c => {
-        if (c.id === mapped.roomId) {
-          const isAtBottom = messagesEndRef.current && 
-            messagesEndRef.current.scrollHeight - messagesEndRef.current.scrollTop <= messagesEndRef.current.clientHeight + 100;
-          
-          if (mapped.roomId === activeId && isAtBottom) {
-             setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+      setConversations(prev => {
+        const exists = prev.some(c => c.id === mapped.roomId);
+        if (!exists) {
+          let roomName = 'Monitored Room';
+          if (mapped.roomId.startsWith('dm-')) {
+            const ids = mapped.roomId.replace('dm-', '').split('_');
+            const participants = ids.map(id => staffList.find(s => s.id === id)).filter(Boolean);
+            if (participants.length === 2) {
+              roomName = `${participants[0]?.name} & ${participants[1]?.name}`;
+            } else if (participants.length === 1) {
+              roomName = `Chat: ${participants[0]?.name}`;
+            }
           }
-
-          return {
-            ...c,
-            messages: [...c.messages, mapped],
-            unread: mapped.roomId !== activeId ? c.unread + 1 : 0
-          };
+          return [...prev, {
+            id: mapped.roomId,
+            type: 'direct',
+            name: roomName,
+            online: false,
+            unread: mapped.roomId !== activeId ? 1 : 0,
+            messages: [mapped],
+          }];
         }
-        return c;
-      }));
+        
+        return prev.map(c => {
+          if (c.id === mapped.roomId) {
+            const isAtBottom = messagesEndRef.current && 
+              messagesEndRef.current.scrollHeight - messagesEndRef.current.scrollTop <= messagesEndRef.current.clientHeight + 100;
+            
+            if (mapped.roomId === activeId && isAtBottom) {
+               setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+            }
+
+            return {
+              ...c,
+              messages: [...c.messages, mapped],
+              unread: mapped.roomId !== activeId ? c.unread + 1 : 0
+            };
+          }
+          return c;
+        });
+      });
     });
 
     newSocket.on('message-deleted', (data: { roomId: string; messageId: string }) => {
@@ -257,6 +327,10 @@ export function ChatCenter() {
   }, [activeId, socket]);
 
   const activeConv = conversations.find((c) => c.id === activeId);
+  const isMonitoredReadOnly = role === Role.ADMIN && 
+    activeConv?.type === 'direct' && 
+    activeConv.id.includes('_') && 
+    !activeConv.id.includes(currentUser.id);
 
   const handleSelectConversation = (id: string) => {
     setActiveId(id);
@@ -319,19 +393,22 @@ export function ChatCenter() {
         attachment
       });
 
-      if (activeId !== 'broadcast') {
-        const recipientId = isAdmin ? activeId.replace('dm-', '') : 'admin';
-        const preview = text
-          ? (text.length > 60 ? text.slice(0, 60) + '…' : text)
-          : attachment
-          ? (attachment.type.startsWith('image/') ? '📷 Sent an image' : `📎 ${attachment.name}`)
-          : '';
-        
-        api.post('/notifications', {
-          recipientId,
-          title: `New message from ${currentUser.name}`,
-          body: preview,
-        }).catch(err => console.error('Failed to send notification:', err));
+      if (activeId !== 'broadcast' && activeId.startsWith('dm-')) {
+        const ids = activeId.replace('dm-', '').split('_');
+        const recipientId = ids.find(id => id !== currentUser.id);
+        if (recipientId) {
+          const preview = text
+            ? (text.length > 60 ? text.slice(0, 60) + '…' : text)
+            : attachment
+            ? (attachment.type.startsWith('image/') ? '📷 Sent an image' : `📎 ${attachment.name}`)
+            : '';
+          
+          api.post('/notifications', {
+            recipientId,
+            title: `New message from ${currentUser.name}`,
+            body: preview,
+          }).catch(err => console.error('Failed to send notification:', err));
+        }
       }
     }
 
@@ -354,12 +431,13 @@ export function ChatCenter() {
   };
 
   const handleStartDM = (staff: StaffAccount) => {
-    const convId = `dm-${staff.id}`;
+    const sortedIds = [currentUser.id, staff.id].sort();
+    const roomId = `dm-${sortedIds[0]}_${sortedIds[1]}`;
     setShowNewDMModal(false);
 
-    if (!conversations.find(c => c.id === convId)) {
+    if (!conversations.find(c => c.id === roomId)) {
        setConversations(prev => [...prev, {
-         id: convId,
+         id: roomId,
          type: 'direct',
          name: staff.name,
          role: staff.role,
@@ -368,7 +446,7 @@ export function ChatCenter() {
          messages: []
        }]);
     }
-    setActiveId(convId);
+    setActiveId(roomId);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -388,12 +466,33 @@ export function ChatCenter() {
   );
 
   const broadcast = filteredConversations.filter((c) => c.type === 'broadcast');
-  const directs = filteredConversations.filter((c) => c.type === 'direct');
+  
+  let directs = filteredConversations.filter((c) => c.type === 'direct');
+  let monitoredDMs: Conversation[] = [];
+  
+  if (role === Role.ADMIN) {
+    directs = filteredConversations.filter((c) => {
+      if (c.type !== 'direct') return false;
+      if (!c.id.includes('_')) return true; // Legacy room
+      return c.id.includes(currentUser.id); // Composite room containing Admin ID
+    });
+    
+    monitoredDMs = filteredConversations.filter((c) => {
+      if (c.type !== 'direct') return false;
+      if (!c.id.includes('_')) return false; // Legacy room
+      return !c.id.includes(currentUser.id); // Monitored composite room
+    });
+  }
 
   const activeStaff = staffList.filter((a) => a.status === 'ACTIVE');
-  const existingDMStaffIds = conversations.filter((c) => c.type === 'direct')
-    .map((c) => c.id.replace('dm-', ''));
-  const availableStaff = activeStaff.filter((s) => !existingDMStaffIds.includes(s.id));
+  const existingDMStaffIds = conversations
+    .filter((c) => c.type === 'direct' && c.id.startsWith('dm-'))
+    .map((c) => {
+      const ids = c.id.replace('dm-', '').split('_');
+      return ids.find(id => id !== currentUser.id);
+    })
+    .filter(Boolean);
+  const availableStaff = activeStaff.filter((s) => s.id !== currentUser.id && !existingDMStaffIds.includes(s.id));
 
   const groupedMessages: { date: string; messages: Message[] }[] = [];
   if (activeConv) {
@@ -452,7 +551,7 @@ export function ChatCenter() {
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                 Direct Messages
               </p>
-              {isAdmin && (
+              {(role === Role.ADMIN || role === Role.ACCOUNTANT || role === Role.AUDITOR) && (
                 <button
                   onClick={() => setShowNewDMModal(true)}
                   title="New Direct Message"
@@ -475,10 +574,28 @@ export function ChatCenter() {
               ))
             ) : (
               <p className="px-4 py-2 text-xs text-gray-600 italic">
-                {isAdmin ? 'Click + to start a private message' : 'No private messages yet'}
+                {role === Role.MANAGER ? 'No private messages yet' : 'Click + to start a private message'}
               </p>
             )}
           </div>
+
+          {/* Monitored Conversations (Admins Only) */}
+          {role === Role.ADMIN && monitoredDMs.length > 0 && (
+            <div>
+              <p className="px-4 pt-4 pb-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                Monitored Conversations
+              </p>
+              {monitoredDMs.map((conv) => (
+                <ConversationItem
+                  key={conv.id}
+                  conv={conv}
+                  isActive={activeId === conv.id}
+                  onClick={() => handleSelectConversation(conv.id)}
+                  isPrivate
+                />
+              ))}
+            </div>
+          )}
 
           {filteredConversations.length === 0 && (
             <div className="p-6 text-center text-gray-500 text-sm">No conversations found</div>
@@ -669,8 +786,9 @@ export function ChatCenter() {
           <div className="flex gap-2 items-end">
             <button
               onClick={() => fileInputRef.current?.click()}
-              title="Attach image or document"
-              className="p-3 text-gray-400 hover:text-white hover:bg-gray-700 rounded-xl transition-colors flex-shrink-0"
+              disabled={isMonitoredReadOnly}
+              title={isMonitoredReadOnly ? "Disabled in read-only mode" : "Attach image or document"}
+              className="p-3 text-gray-400 hover:text-white hover:bg-gray-700 rounded-xl transition-colors flex-shrink-0 disabled:opacity-40"
             >
               <Paperclip className="w-5 h-5" />
             </button>
@@ -679,8 +797,11 @@ export function ChatCenter() {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
+              disabled={isMonitoredReadOnly}
               placeholder={
-                activeConv?.type === 'broadcast'
+                isMonitoredReadOnly
+                  ? "Read-only monitored conversation..."
+                  : activeConv?.type === 'broadcast'
                   ? `Message #All Staff…`
                   : `Private message to ${activeConv?.name}…`
               }
@@ -695,13 +816,15 @@ export function ChatCenter() {
             />
             <button
               onClick={handleSend}
-              disabled={!inputText.trim() && !attachment}
+              disabled={isMonitoredReadOnly || (!inputText.trim() && !attachment)}
               className="p-3 bg-primary text-white rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
             >
               <Send className="w-5 h-5" />
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-2">Press Enter to send · Shift+Enter for new line</p>
+          <p className="text-xs text-gray-500 mt-2">
+            {isMonitoredReadOnly ? 'Monitored read-only view' : 'Press Enter to send · Shift+Enter for new line'}
+          </p>
         </div>
       </div>
 

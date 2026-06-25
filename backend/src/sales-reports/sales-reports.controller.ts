@@ -25,7 +25,7 @@ export class SalesReportsController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'AUDITOR')
+  @Roles('ADMIN', 'ACCOUNTANT', 'AUDITOR')
   @Get('audit')
   findForAudit() {
     return this.salesReportsService.findForAudit();
@@ -51,16 +51,16 @@ export class SalesReportsController {
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'AUDITOR')
+  @Roles('ACCOUNTANT', 'AUDITOR')
   @Patch(':id/approve')
-  approve(@Param('id') id: string) {
-    return this.salesReportsService.approve(id);
+  approve(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.salesReportsService.approve(id, user.id || user.sub);
   }
 
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'AUDITOR')
+  @Roles('ACCOUNTANT', 'AUDITOR')
   @Patch(':id/reject')
-  reject(@Param('id') id: string, @Body('reason') reason?: string) {
-    return this.salesReportsService.reject(id, reason);
+  reject(@Param('id') id: string, @Body('reason') reason: string, @CurrentUser() user: any) {
+    return this.salesReportsService.reject(id, user.id || user.sub, reason);
   }
 }

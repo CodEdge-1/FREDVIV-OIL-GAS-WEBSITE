@@ -51,18 +51,26 @@ export class ChatService {
   }
 
   async getLastMessages(userId: string, role: string) {
+    const rooms = await this.prisma.chatMessage.findMany({
+      select: { roomId: true },
+      distinct: ['roomId'],
+    });
+
     let roomIds = ['broadcast'];
-    
-    if (role === 'ADMIN') {
-      // Find all rooms in the system
-      const rooms = await this.prisma.chatMessage.findMany({
-        select: { roomId: true },
-        distinct: ['roomId'],
-      });
-      roomIds = Array.from(new Set(['broadcast', ...rooms.map(r => r.roomId)]));
-    } else {
-      roomIds.push(`dm-${userId}`);
+    for (const r of rooms) {
+      const roomId = r.roomId;
+      if (roomId === 'broadcast') continue;
+
+      if (role === 'ADMIN') {
+        roomIds.push(roomId);
+      } else {
+        const parts = roomId.replace('dm-', '').split('_');
+        if (parts.includes(userId) || (parts.length === 1 && parts[0] === userId)) {
+          roomIds.push(roomId);
+        }
+      }
     }
+    roomIds = Array.from(new Set(roomIds));
 
     const lastMessages = await Promise.all(
       roomIds.map(async (roomId) => {

@@ -6,13 +6,14 @@ import { logout } from '../../lib/auth';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
 import { type SalesReport } from '../../lib/store'; // Keep type for now, will replace with backend type
-import { Filter, Download, Calendar, FileText } from 'lucide-react';
+import { ReportDetailsModal } from '../../components/dashboard/ReportDetailsModal';
+import { Filter, Download, Calendar, FileText, Eye } from 'lucide-react';
 
 export function BranchReports() {
   const navigate = useNavigate();
   const [selectedBranch, setSelectedBranch] = useState('all');
-
   const [reports, setReports] = useState<SalesReport[]>([]);
+  const [selectedReport, setSelectedReport] = useState<any | null>(null);
 
   useEffect(() => {
     const fetchReports = async () => {
@@ -133,12 +134,13 @@ export function BranchReports() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">AGO Sold / Remaining</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Sales</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
+                    <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-700">
                   {filteredReports.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-16 text-center">
+                      <td colSpan={7} className="px-6 py-16 text-center">
                         <div className="flex flex-col items-center gap-3">
                           <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center">
                             <FileText className="w-6 h-6 text-gray-500" />
@@ -176,7 +178,16 @@ export function BranchReports() {
                           <span className="text-white font-bold">{formatCurrency(report.totalSales)}</span>
                         </td>
                         <td className="px-6 py-4">
-                          <StatusBadge status="submitted" />
+                          <StatusBadge status={report.status as any} />
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            onClick={() => setSelectedReport(report)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors text-xs font-semibold"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            Details
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -187,6 +198,13 @@ export function BranchReports() {
           </div>
         </main>
       </div>
+
+      {selectedReport && (
+        <ReportDetailsModal
+          report={selectedReport}
+          onClose={() => setSelectedReport(null)}
+        />
+      )}
     </div>
   );
 }

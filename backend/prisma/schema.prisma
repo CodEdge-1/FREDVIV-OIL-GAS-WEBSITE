@@ -38,6 +38,7 @@ enum ActivityType {
   BALANCE
   SECURITY
   USER
+  SALES
 }
 
 enum ProductType {
@@ -66,6 +67,7 @@ model User {
 
   branch              Branch?            @relation(fields: [branchId], references: [id])
   salesReports        SalesReport[]      @relation("ReportManager")
+  reviewedReports     SalesReport[]      @relation("ReportReviewer")
   expenses            Expense[]          @relation("ExpenseManager")
   approvedExpenses    Expense[]          @relation("ExpenseApprover")
   notifications       Notification[]
@@ -104,6 +106,15 @@ model SalesReport {
 
   manager   User   @relation("ReportManager", fields: [managerId], references: [id])
   managerId String
+
+  // New fields
+  customProducts      Json?          @default("[]")
+  previousCashAtHand  Float          @default(0)
+  cashToBank          Float          @default(0)
+  actualCashAtHand    Float          @default(0)
+  footnote            String?
+  reviewedById        String?
+  reviewedBy          User?          @relation("ReportReviewer", fields: [reviewedById], references: [id])
 }
 
 model Expense {

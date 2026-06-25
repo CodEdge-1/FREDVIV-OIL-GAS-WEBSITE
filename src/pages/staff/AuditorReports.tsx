@@ -4,6 +4,7 @@ import { Sidebar } from '../../components/dashboard/Sidebar';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
 import { type SalesReport } from '../../lib/store'; // Keep type for now, will replace with backend type
+import { ReportDetailsModal } from '../../components/dashboard/ReportDetailsModal';
 import {
   ClipboardCheck,
   AlertTriangle,
@@ -14,6 +15,7 @@ import {
   Download,
   FileBarChart2,
   FileText,
+  Eye,
 } from 'lucide-react';
 
 type AuditStatus = 'PENDING' | 'APPROVED' | 'REJECTED'; // Align with Prisma Status enum
@@ -51,6 +53,7 @@ export function AuditorReports() {
   const [statusFilter, setStatusFilter] = useState<'all' | AuditStatus>('all');
   const [flagModal, setFlagModal] = useState<AuditReport | null>(null);
   const [flagNote, setFlagNote] = useState('');
+  const [detailReport, setDetailReport] = useState<AuditReport | null>(null);
 
   const fetchReports = async () => {
     try {
@@ -225,44 +228,54 @@ export function AuditorReports() {
                             </span>
                           </td>
                           <td className="px-5 py-4">
-                            <AuditStatusBadge status={report.auditStatus} />
-                            {report.auditNote && (
-                              <p className="text-xs text-gray-500 mt-1 max-w-[160px] truncate" title={report.auditNote}>
-                                {report.auditNote}
-                              </p>
-                            )}
+                            <span className="flex flex-col gap-1">
+                              <AuditStatusBadge status={report.auditStatus} />
+                              {report.reviewedBy && (
+                                <span className="text-[10px] text-gray-500">
+                                  by {report.reviewedBy.name} ({report.reviewedBy.role.toLowerCase()})
+                                </span>
+                              )}
+                              {report.status === 'REJECTED' && report.footnote && (
+                                <p className="text-xs text-red-400/80 italic mt-0.5 max-w-[150px] truncate" title={report.footnote}>
+                                  "{report.footnote}"
+                                </p>
+                              )}
+                            </span>
                           </td>
                           <td className="px-5 py-4">
-                            {report.auditStatus === 'PENDING' && (
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => handleMarkAudited(report.id)}
-                                  className="flex items-center gap-1 px-3 py-1.5 bg-green-500/10 text-green-400 border border-green-500/20 text-xs font-medium rounded-lg hover:bg-green-500/20 transition-colors"
-                                >
-                                  <CheckCircle className="w-3.5 h-3.5" />
-                                  Approve
-                                </button>
-                                <button
-                                  onClick={() => { setFlagModal(report); setFlagNote(''); }}
-                                  className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-colors"
-                                >
-                                  <Flag className="w-3.5 h-3.5" />
-                                  Flag
-                                </button>
-                              </div>
-                            )}
-                            {report.auditStatus === 'APPROVED' && (
-                              <span className="text-xs text-gray-500">No action needed</span>
-                            )}
-                            {report.auditStatus === 'REJECTED' && (
+                            <div className="flex gap-2 items-center">
                               <button
-                                onClick={() => handleMarkAudited(report.id)}
-                                className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 text-gray-300 border border-gray-600 text-xs font-medium rounded-lg hover:bg-gray-600 transition-colors"
+                                onClick={() => setDetailReport(report)}
+                                className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-medium rounded-lg transition-colors"
                               >
-                                <CheckCircle className="w-3.5 h-3.5" />
-                                Clear Flag
+                                <Eye className="w-3.5 h-3.5" />
+                                Details
                               </button>
-                            )}
+                              {report.auditStatus === 'PENDING' && (
+                                <>
+                                  <button
+                                    onClick={() => handleMarkAudited(report.id)}
+                                    className="flex items-center gap-1 px-3 py-1.5 bg-green-500/10 text-green-400 border border-green-500/20 text-xs font-medium rounded-lg hover:bg-green-500/20 transition-colors"
+                                  >
+                                    <CheckCircle className="w-3.5 h-3.5" />
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => { setFlagModal(report); setFlagNote(''); }}
+                                    className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-colors"
+                                  >
+                                    <Flag className="w-3.5 h-3.5" />
+                                    Flag
+                                  </button>
+                                </>
+                              )}
+                              {report.auditStatus === 'APPROVED' && (
+                                <span className="text-xs text-gray-500">Audited</span>
+                              )}
+                              {report.auditStatus === 'REJECTED' && (
+                                <span className="text-xs text-gray-500">Flagged</span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -334,6 +347,14 @@ export function AuditorReports() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Report Details Modal */}
+      {detailReport && (
+        <ReportDetailsModal
+          report={detailReport as any}
+          onClose={() => setDetailReport(null)}
+        />
       )}
     </div>
   );

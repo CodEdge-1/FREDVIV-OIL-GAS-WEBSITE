@@ -80,13 +80,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (data.roomId === 'broadcast') {
       this.server.to('broadcast').emit('new-message', message);
     } else if (data.roomId.startsWith('dm-')) {
-      const staffId = data.roomId.replace('dm-', '');
-      // Route message to staff's personal room and all admins' personal rooms
-      this.server.to(`user-${staffId}`).emit('new-message', message);
-      
+      const idsPart = data.roomId.replace('dm-', '');
+      const userIds = idsPart.includes('_') ? idsPart.split('_') : [idsPart];
+
+      // Route message to both DM participants' personal rooms
+      for (const uid of userIds) {
+        this.server.to(`user-${uid}`).emit('new-message', message);
+      }
+
+      // Also route the message to all Admins' personal rooms so they can monitor
       const adminIds = await this.chatService.getAdminUserIds();
       for (const adminId of adminIds) {
-        if (adminId !== staffId) {
+        if (!userIds.includes(adminId)) {
           this.server.to(`user-${adminId}`).emit('new-message', message);
         }
       }
@@ -97,13 +102,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (roomId === 'broadcast') {
       this.server.to('broadcast').emit('message-deleted', { roomId, messageId });
     } else if (roomId.startsWith('dm-')) {
-      const recipientId = roomId.replace('dm-', '');
-      this.server.to(`user-${senderId}`).emit('message-deleted', { roomId, messageId });
-      this.server.to(`user-${recipientId}`).emit('message-deleted', { roomId, messageId });
-      
+      const idsPart = roomId.replace('dm-', '');
+      const userIds = idsPart.includes('_') ? idsPart.split('_') : [idsPart];
+
+      for (const uid of userIds) {
+        this.server.to(`user-${uid}`).emit('message-deleted', { roomId, messageId });
+      }
+
       this.chatService.getAdminUserIds().then(adminIds => {
         for (const adminId of adminIds) {
-          if (adminId !== senderId && adminId !== recipientId) {
+          if (!userIds.includes(adminId)) {
             this.server.to(`user-${adminId}`).emit('message-deleted', { roomId, messageId });
           }
         }
