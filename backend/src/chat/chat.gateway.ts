@@ -13,10 +13,7 @@ import { ChatService } from './chat.service';
 
 @WebSocketGateway({
   cors: {
-    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      callback(null, true);
-    },
-    credentials: true,
+    origin: '*',
   },
   namespace: '/chat',
 })
