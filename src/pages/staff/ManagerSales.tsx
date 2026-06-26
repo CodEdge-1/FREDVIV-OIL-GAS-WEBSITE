@@ -25,6 +25,7 @@ export function ManagerSales() {
   const [existingReport, setExistingReport] = useState<any | null>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [customProductEntries, setCustomProductEntries] = useState<any[]>([]);
+  const [customProductsCatalog, setCustomProductsCatalog] = useState<any[]>([]);
 
   // Cash management states
   const [previousCashAtHand, setPreviousCashAtHand] = useState('');
@@ -41,66 +42,42 @@ export function ManagerSales() {
     }).format(amount);
   };
 
-  const fetchHistory = async () => {
+  const fetchData = async () => {
     if (!session?.id) return;
     try {
-      const data = await api.get(`/sales-reports?managerId=${session.id}`);
-      setHistory(data);
+      const localToday = getLocalDateString();
+      const [userData, priceData, historyData, customProductsData] = await Promise.all([
+        api.get(`/users/${session.id}`),
+        api.get('/fuel-prices/current'),
+        api.get(`/sales-reports?managerId=${session.id}`),
+        api.get('/custom-products'),
+      ]);
+      setAccount(userData);
+      setPrices(priceData);
+      setHistory(historyData);
+      setCustomProductsCatalog(customProductsData || []);
+
+      // Find the oldest unapproved report in history (REJECTED, PENDING, or SUBMITTED)
+      const unapproved = (historyData || []).filter(
+        (r: any) => r.status === 'REJECTED' || r.status === 'SUBMITTED' || r.status === 'PENDING'
+      );
+      const oldestUnapproved = unapproved.length > 0 ? unapproved[unapproved.length - 1] : null;
+
+      // If there's an unapproved report from a past date, load it
+      if (oldestUnapproved && oldestUnapproved.date < localToday) {
+        setExistingReport(oldestUnapproved);
+      } else {
+        // Otherwise, load today's report if it exists
+        const todayReport = (historyData || []).find((r: any) => r.date === localToday);
+        setExistingReport(todayReport || null);
+      }
     } catch (error) {
-      console.error('Failed to fetch sales history:', error);
+      console.error('Failed to fetch sales data:', error);
+      toast.error('Failed to load sales data.');
     }
   };
 
   useEffect(() => {
-    const fetchData = async () => {
-      if (!session?.id) return;
-      try {
-        const localToday = getLocalDateString();
-        const [userData, priceData, salesReportData, customProductsData] = await Promise.all([
-          api.get(`/users/${session.id}`),
-          api.get('/fuel-prices/current'),
-          api.get(`/sales-reports/today/${session.id}?date=${localToday}`),
-          api.get('/custom-products'),
-        ]);
-        setAccount(userData);
-        setPrices(priceData);
-        setExistingReport(salesReportData);
-
-        if (salesReportData) {
-          if (salesReportData.customProducts) {
-            const parsed = typeof salesReportData.customProducts === 'string'
-              ? JSON.parse(salesReportData.customProducts)
-              : salesReportData.customProducts;
-            setCustomProductEntries(parsed || []);
-          } else {
-            setCustomProductEntries([]);
-          }
-          setPreviousCashAtHand(String(salesReportData.previousCashAtHand ?? '0'));
-          setCashToBank(String(salesReportData.cashToBank ?? '0'));
-          setActualCashAtHand(String(salesReportData.actualCashAtHand ?? '0'));
-        } else {
-          // New report: pre-populate custom products from catalog
-          setCustomProductEntries((customProductsData || []).map((cp: any) => ({
-            id: cp.id,
-            name: cp.name,
-            code: cp.code,
-            price: cp.price,
-            opening: '',
-            sold: '',
-            remaining: '',
-            overage: '0',
-          })));
-          setPreviousCashAtHand('');
-          setCashToBank('');
-          setActualCashAtHand('');
-        }
-
-        fetchHistory();
-      } catch (error) {
-        console.error('Failed to fetch sales data:', error);
-        toast.error('Failed to load sales data.');
-      }
-    };
     fetchData();
   }, [session?.id]);
 
@@ -149,11 +126,36 @@ export function ManagerSales() {
       }
     } else {
       setIsSubmitted(false);
+      setOpeningPMS('');
+      setOpeningAGO('');
+      setSoldPMS('');
+      setSoldAGO('');
+      setRemainingPMS('');
+      setRemainingAGO('');
+      setOveragePMS('0');
+      setOverageAGO('0');
+      setCardPayments('');
+      setBankTransfers('');
+      setCashPayments('');
+      setPreviousCashAtHand('');
+      setCashToBank('');
+      setActualCashAtHand('');
+      setCustomProductEntries((customProductsCatalog || []).map((cp: any) => ({
+        id: cp.id,
+        name: cp.name,
+        code: cp.code,
+        price: cp.price,
+        opening: '',
+        sold: '',
+        remaining: '',
+        overage: '0',
+      })));
     }
-  }, [existingReport]);
+  }, [existingReport, customProductsCatalog]);
 
   const previousUnapproved = history.find(
-    (r) => r.date < today && (r.status === 'REJECTED' || r.status === 'SUBMITTED' || r.status === 'PENDING')
+    (r) => r.date < (existingReport ? existingReport.date : today) && 
+           (r.status === 'REJECTED' || r.status === 'SUBMITTED' || r.status === 'PENDING')
   );
 
   const isLocked = isSubmitted || !!previousUnapproved;
@@ -176,9 +178,12 @@ export function ManagerSales() {
       return;
     }
 
+    const reportDate = existingReport ? existingReport.date : today;
+    const isResubmission = !!existingReport;
+
     const reportData = {
       branchId: account.branchId,
-      date: today,
+      date: reportDate,
       openingPMS: Number(openingPMS),
       soldPMS: Number(soldPMS),
       remainingPMS: Number(remainingPMS),
@@ -191,7 +196,6 @@ export function ManagerSales() {
       cardPayments: Number(cardPayments),
       bankTransfers: Number(bankTransfers),
       cashPayments: Number(cashPayments),
-      // New custom products and cash management data
       customProducts: customProductEntries.map(cp => ({
         id: cp.id,
         name: cp.name,
@@ -209,20 +213,25 @@ export function ManagerSales() {
 
     try {
       await api.post('/sales-reports', reportData);
-      toast.success('Sales report submitted successfully!');
-      const localToday = getLocalDateString();
-      const updatedReport = await api.get(`/sales-reports/today/${session.id}?date=${localToday}`);
-      setExistingReport(updatedReport);
-      fetchHistory();
+      toast.success(isResubmission ? 'Sales report resubmitted successfully!' : 'Sales report submitted successfully!');
+      
+      // Reload everything
+      await fetchData();
 
       // Notify accountants and auditors
       const allUsers = await api.get('/users');
       const reviewers = allUsers.filter((u: any) => u.role === 'ACCOUNTANT' || u.role === 'AUDITOR');
+      
+      const notificationTitle = isResubmission ? 'Sales Report Resubmitted' : 'Sales Report Submitted';
+      const notificationBody = isResubmission
+        ? `${session.name} (${branchName}) resubmitted the sales report for ${reportDate} — ${formatCurrency(totalDailySales)} total.`
+        : `${session.name} (${branchName}) submitted a daily sales report for ${reportDate} — ${formatCurrency(totalDailySales)} total.`;
+
       for (const r of reviewers) {
         await api.post('/notifications', {
           userId: r.id,
-          title: 'Sales Report Submitted',
-          body: `${session.name} (${branchName}) submitted a daily sales report — ${formatCurrency(totalDailySales)} total.`,
+          title: notificationTitle,
+          body: notificationBody,
         });
       }
     } catch (error: any) {
@@ -249,31 +258,51 @@ export function ManagerSales() {
           </div>
         </header>
 
-        {/* Lockout Warning Banner */}
-        {previousUnapproved && (
+        {/* Active report is a past report under review */}
+        {existingReport && existingReport.date < today && (existingReport.status === 'SUBMITTED' || existingReport.status === 'PENDING') && (
+          <div className="mx-6 mt-6 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-4 text-sm text-red-400 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Dashboard Locked (Previous Report Under Review)</p>
+              <p className="mt-1 text-gray-300">
+                You cannot enter a new day's report because your report for <strong className="text-white">{existingReport.date}</strong> is currently under review. Please wait for the Accountant/Auditor to approve it.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Active report is rejected (rectification mode) */}
+        {existingReport && existingReport.status === 'REJECTED' && (
+          <div className="mx-6 mt-6 bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-4 text-sm text-amber-400 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Report Flagged / Discrepancy Found ({existingReport.date})</p>
+              <p className="mt-1 text-gray-300">
+                Your report for <strong className="text-white">{existingReport.date === today ? 'today' : existingReport.date}</strong> has been rejected by the reviewer.
+                {existingReport.footnote && (
+                  <>
+                    {' '}with the footnote:
+                    <span className="block mt-1.5 p-2 bg-gray-900/50 rounded border border-gray-700/40 text-amber-300 italic">
+                      "{existingReport.footnote}"
+                    </span>
+                  </>
+                )}
+                <span className="block mt-2">
+                  Please review your figures below, correct any errors, and click <strong className="text-amber-300">Resubmit Daily Report</strong>.
+                </span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Generic Lockout Warning Banner */}
+        {previousUnapproved && (!existingReport || existingReport.date !== previousUnapproved.date) && (
           <div className="mx-6 mt-6 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-4 text-sm text-red-400 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
             <div>
               <p className="font-bold">Dashboard Locked (Unapproved Previous Report)</p>
               <p className="mt-1 text-gray-300">
                 You cannot enter a new day's report because your report for <strong className="text-white">{previousUnapproved.date}</strong> is currently in <strong className="text-white">{previousUnapproved.status.toLowerCase()}</strong> status. You must wait for the Accountant/Auditor to approve it, or rectify it if it was flagged.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Discrepancy Flag Footnote Banner */}
-        {existingReport && existingReport.status === 'REJECTED' && existingReport.footnote && (
-          <div className="mx-6 mt-6 bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-4 text-sm text-amber-400 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Report Flagged / Discrepancy Found</p>
-              <p className="mt-1 text-gray-300">
-                Your report for today has been rejected with the footnote:
-                <span className="block mt-1.5 p-2 bg-gray-900/50 rounded border border-gray-700/40 text-amber-300 italic">
-                  "{existingReport.footnote}"
-                </span>
-                Please review your figures, rectify the error, and click **Resubmit Daily Report** below.
               </p>
             </div>
           </div>
@@ -289,8 +318,16 @@ export function ManagerSales() {
           <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-xl font-bold text-white">Daily Sales Entry</h2>
-                <p className="text-gray-400 text-sm">Record today's sales data</p>
+                <h2 className="text-xl font-bold text-white">
+                  {existingReport && existingReport.date < today 
+                    ? `Sales Entry for ${existingReport.date}` 
+                    : 'Daily Sales Entry'}
+                </h2>
+                <p className="text-gray-400 text-sm">
+                  {existingReport && existingReport.date < today
+                    ? `Rectify or view sales data for ${existingReport.date}`
+                    : "Record today's sales data"}
+                </p>
               </div>
               {existingReport && (
                 <div className="flex items-center gap-2">
