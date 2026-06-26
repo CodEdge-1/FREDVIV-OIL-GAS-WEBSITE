@@ -100,6 +100,7 @@ function App() {
           <Route path="/staff/accountant/dashboard" element={<ProtectedRoute><AccountantDashboard /></ProtectedRoute>} />
           <Route path="/staff/accountant/transactions" element={<ProtectedRoute><AccountantTransactions /></ProtectedRoute>} />
           <Route path="/staff/accountant/reports" element={<ProtectedRoute><AccountantReports /></ProtectedRoute>} />
+          <Route path="/staff/accountant/expenses" element={<ProtectedRoute><ExpenseApprovals /></ProtectedRoute>} />
           <Route path="/staff/accountant/chat" element={<ProtectedRoute><ChatCenter /></ProtectedRoute>} />
           <Route path="/staff/accountant/settings" element={<ProtectedRoute><FinanceSettings /></ProtectedRoute>} />
 
@@ -107,6 +108,7 @@ function App() {
           <Route path="/staff/auditor/dashboard" element={<ProtectedRoute><AuditorDashboard /></ProtectedRoute>} />
           <Route path="/staff/auditor/transactions" element={<ProtectedRoute><AuditorTransactions /></ProtectedRoute>} />
           <Route path="/staff/auditor/reports" element={<ProtectedRoute><AuditorReports /></ProtectedRoute>} />
+          <Route path="/staff/auditor/expenses" element={<ProtectedRoute><ExpenseApprovals /></ProtectedRoute>} />
           <Route path="/staff/auditor/chat" element={<ProtectedRoute><ChatCenter /></ProtectedRoute>} />
           <Route path="/staff/auditor/settings" element={<ProtectedRoute><FinanceSettings /></ProtectedRoute>} />
 

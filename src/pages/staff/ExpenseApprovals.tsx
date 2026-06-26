@@ -11,6 +11,7 @@ import { Check, X } from 'lucide-react';
 export function ExpenseApprovals() {
   const navigate = useNavigate();
   const session = getSession();
+  const userRole = session?.role || 'ADMIN';
   const [expenses, setExpenses] = useState<Expense[]>([]); // Initialize with empty array
 
   const fetchExpenses = async () => {
@@ -85,14 +86,18 @@ export function ExpenseApprovals() {
   const thisMonth = expenses.filter((e) => e.date.startsWith(new Date().toISOString().slice(0, 7)));
 
   return (
-    <div className="flex min-h-screen bg-gray-900"> {/* Sidebar role prop updated to uppercase */}
-      <Sidebar role="ADMIN" onLogout={() => { logout(); navigate('/staff/login'); }} />
+    <div className="flex min-h-screen bg-gray-900">
+      <Sidebar role={userRole} onLogout={() => { logout(); navigate('/staff/login'); }} />
 
       <div className="flex-1 overflow-x-hidden">
         <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
           <div className="px-6 py-4">
-            <h1 className="text-2xl font-bold text-white">Expense Approvals</h1>
-            <p className="text-gray-400 text-sm">Review and approve expense requests</p>
+            <h1 className="text-2xl font-bold text-white">
+              {userRole === 'ADMIN' ? 'Expense Approvals' : 'Expense Requests'}
+            </h1>
+            <p className="text-gray-400 text-sm">
+              {userRole === 'ADMIN' ? 'Review and approve expense requests' : 'View branch expense requests and status'}
+            </p>
           </div>
         </header>
 
@@ -154,7 +159,7 @@ export function ExpenseApprovals() {
                         <td className="px-6 py-4 text-gray-400 text-sm">{expense.date}</td>
                         <td className="px-6 py-4"><StatusBadge status={expense.status.toLowerCase() as any} /></td>
                         <td className="px-6 py-4">
-                          {expense.status === 'PENDING' ? (
+                          {expense.status === 'PENDING' && userRole === 'ADMIN' ? (
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => handleApprove(expense.id)}

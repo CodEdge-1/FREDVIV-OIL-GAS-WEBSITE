@@ -97,6 +97,7 @@ export function Sidebar({ role, onLogout }: SidebarProps) {
     { path: '/staff/accountant/dashboard', icon: LayoutDashboard, label: 'Dashboard', role: 'ACCOUNTANT' },
     { path: '/staff/accountant/transactions', icon: TrendingUp, label: 'Transactions', role: 'ACCOUNTANT' },
     { path: '/staff/accountant/reports', icon: FileText, label: 'Sales Reports', role: 'ACCOUNTANT' },
+    { path: '/staff/accountant/expenses', icon: CheckSquare, label: 'Expenses', role: 'ACCOUNTANT' },
     { path: '/staff/accountant/chat', icon: MessageSquare, label: 'Chat', role: 'ACCOUNTANT' },
     { path: '/staff/accountant/settings', icon: Settings, label: 'Settings', role: 'ACCOUNTANT' },
   ];
@@ -105,6 +106,7 @@ export function Sidebar({ role, onLogout }: SidebarProps) {
     { path: '/staff/auditor/dashboard', icon: LayoutDashboard, label: 'Dashboard', role: 'AUDITOR' },
     { path: '/staff/auditor/transactions', icon: TrendingUp, label: 'Transactions', role: 'AUDITOR' },
     { path: '/staff/auditor/reports', icon: FileText, label: 'Sales Reports', role: 'AUDITOR' },
+    { path: '/staff/auditor/expenses', icon: CheckSquare, label: 'Expenses', role: 'AUDITOR' },
     { path: '/staff/auditor/chat', icon: MessageSquare, label: 'Chat', role: 'AUDITOR' },
     { path: '/staff/auditor/settings', icon: Settings, label: 'Settings', role: 'AUDITOR' },
   ];
