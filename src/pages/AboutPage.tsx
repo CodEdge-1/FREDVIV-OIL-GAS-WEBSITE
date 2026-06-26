@@ -88,7 +88,7 @@ export function AboutPage() {
                   <div className="relative mb-6">
                     <div className="aspect-square rounded-xl overflow-hidden shadow-xl">
                       <ImageWithFallback
-                        src="/assets/about-ceo.jpg"
+                        src="/assets/about-ceo.png"
                         alt="CEO Portrait"
                         className="w-full h-full object-cover"
                       />
