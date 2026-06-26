@@ -28,7 +28,7 @@ export function AboutPage() {
             <div className="order-2 md:order-1">
               <div className="relative h-[500px] rounded-2xl overflow-hidden shadow-xl">
                 <ImageWithFallback
-                  src="/assets/about-team.jpg"
+                  src="/assets/about-team.png"
                   alt="Business team"
                   className="w-full h-full object-cover"
                 />

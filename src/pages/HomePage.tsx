@@ -66,7 +66,7 @@ export function HomePage() {
             </div>
             <div className="relative h-[400px] rounded-2xl overflow-hidden shadow-xl">
               <ImageWithFallback
-                src="/assets/home-tanker.jpg"
+                src="/assets/home-tanker.png"
                 alt="Oil tanker truck"
                 className="w-full h-full object-cover"
               />
